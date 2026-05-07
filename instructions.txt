@@ -1,0 +1,82 @@
+4 steps for IAM
+
+IDP
+CIBA - OAuth2 
+Client initiated back channel authentication
+
+take care of jail break or prompt injection
+
+user llm as a judge and use local llm model . 
+for agent inference use high end llm model calls
+
+preserving of principal of least previledge
+non human identities
+agent tools which are called are the tools we can trust. how do we make sure we call only the tools we 
+approved ?
+
+
+SPIRE
+
+
+add zero trust 
+verify then trust
+
+just in time trust
+UADP  intent to policy structure 
+
+not standing policies
+need to add guardrails 
+preserving of principal of least previledge
+non human identities
+agent tools which are called are the tools we can trust. how do we make sure we call only the tools we 
+approved ? can the tool be replaced with malicious tool with same name ? tool registry with hash ?
+can the prompt injection change the tool which is malicious and not intended. 
+
+the github repo - https://github.com/Arcanum-Sec/arc_pi_taxonomy has lot of prompt injections
+
+registry of agents ? 
+
+can the agent call any tool no. It needs to be intent driven. Internal llm as a judge comes into play if the 
+intent is not matching the tool call. will that mean that the hardcoded policy engine is not needed ? 
+it is dynamic ?
+
+makaroon , wafer,  buscuits 
+self attenuating scope - scope trimming 
+symantic inspection not syntactical inspection 
+
+stop prompt injection
+indirect prompt injection from searching the web or usage of open tools
+
+policy preferences
+dynamically write policies
+
+every agent or subagent gets unique credentials with access control
+RBAC
+
+what will be agentic ai firewall or gateway to restrict
+
+throttle or Human in the loop
+
+accountablity 
+previleges only for needed work
+delegation to subagents , inherit the identity of caller ? no
+
+tie action to intent -- llm as a judge 
+
+audit everything from left to right 
+federate the workload to understand what is going on in the system
+
+can we do posture management and threat management
+posture checks - red teaming 
+
+CNAPP 2.0 where is it going 
+
+runtime protection
+
+source
+
+autonomy - power - assurance
+
+https://www.youtube.com/watch?v=YQdm32PZWaM
+
+https://www.youtube.com/watch?v=j51uMah-3js
