@@ -1,0 +1,8 @@
+# Claude Code
+.claude/
+
+# Runtime env / secrets
+scripts/.env
+
+# OS
+.DS_Store

@@ -1,0 +1,33 @@
+global:
+  spire:
+    trustDomain: "firm.internal"
+    clusterName: "agentic-security"
+
+spire-server:
+  replicaCount: 1
+  nodeSelector:
+    role: system
+  dataStore:
+    sql:
+      databaseType: sqlite3
+      connectionString: "/run/spire/data/datastore.sqlite3"
+  nodeAttestor:
+    k8sPsat:
+      enabled: true
+      serviceAccountAllowList:
+        - "spire-system:spire-agent"
+  keyManager:
+    disk:
+      enabled: true
+  caKeyType: "ec-p256"
+  caTTL: "24h"
+  defaultSVIDTTL: "1h"
+
+spire-agent:
+  nodeAttestor:
+    k8sPsat:
+      enabled: true
+  workloadAttestors:
+    k8s:
+      enabled: true
+  socketPath: /run/spire/sockets/agent.sock

@@ -1,0 +1,46 @@
+replicaCount: 2
+
+nodeSelector:
+  role: application
+
+image:
+  repository: openpolicyagent/opa
+  tag: "0.63.0-rootless"
+
+args:
+  - "run"
+  - "--server"
+  - "--addr=0.0.0.0:8181"
+  - "--diagnostic-addr=0.0.0.0:8282"
+  - "--log-format=json"
+  - "--log-level=info"
+  - "--set=decision_logs.console=true"
+
+mgmt:
+  enabled: true
+  data:
+    enabled: true
+  policies:
+    enabled: true
+
+sar:
+  enabled: false
+
+authz:
+  enabled: false
+
+deploymentStrategy:
+  rollingUpdate:
+    maxUnavailable: 1
+
+service:
+  type: ClusterIP
+  port: 8181
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    cpu: 1000m
+    memory: 512Mi

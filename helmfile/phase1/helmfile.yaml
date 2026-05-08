@@ -1,0 +1,197 @@
+repositories:
+  - name: istio
+    url: https://istio-release.storage.googleapis.com/charts
+  - name: spiffe
+    url: https://spiffe.github.io/helm-charts-hardened
+  - name: hashicorp
+    url: https://helm.releases.hashicorp.com
+  - name: bitnami
+    url: https://charts.bitnami.com/bitnami
+  - name: opa
+    url: https://open-policy-agent.github.io/kube-mgmt/charts
+  - name: open-telemetry
+    url: https://open-telemetry.github.io/opentelemetry-helm-charts
+  - name: grafana
+    url: https://grafana.github.io/helm-charts
+
+helmDefaults:
+  wait: true
+  timeout: 300
+  createNamespace: true
+
+releases:
+
+  # ── Istio ──────────────────────────────────────────────────────────────────
+
+  - name: istio-base
+    namespace: istio-system
+    chart: istio/base
+    version: "1.20.2"
+    values:
+      - values/istio-base.yaml
+
+  - name: istiod
+    namespace: istio-system
+    chart: istio/istiod
+    version: "1.20.2"
+    needs:
+      - istio-system/istio-base
+    values:
+      - values/istiod.yaml
+    hooks:
+      - events: ["postsync"]
+        command: "kubectl"
+        args:
+          - apply
+          - -f
+          - helmfile/phase1/manifests/peer-authentication-strict.yaml
+
+  # ── SPIRE ──────────────────────────────────────────────────────────────────
+
+  - name: spire
+    namespace: spire-system
+    chart: spiffe/spire
+    version: "0.21.0"
+    needs:
+      - istio-system/istiod
+    values:
+      - values/spire.yaml
+    hooks:
+      - events: ["postsync"]
+        command: "bash"
+        args: ["helmfile/phase1/hooks/spire-register-entries.sh"]
+
+  # ── Consul ─────────────────────────────────────────────────────────────────
+
+  - name: consul
+    namespace: infra
+    chart: hashicorp/consul
+    version: "1.3.2"
+    needs:
+      - spire-system/spire
+    values:
+      - values/consul.yaml
+    hooks:
+      - events: ["postsync"]
+        command: "bash"
+        args: ["helmfile/phase1/hooks/consul-seed-registries.sh"]
+      - events: ["postsync"]
+        command: "bash"
+        args: ["helmfile/phase1/hooks/consul-coredns-patch.sh"]
+
+  # ── Vault ──────────────────────────────────────────────────────────────────
+
+  - name: vault
+    namespace: infra
+    chart: hashicorp/vault
+    version: "0.27.0"
+    needs:
+      - infra/consul
+    values:
+      - values/vault.yaml
+    hooks:
+      - events: ["postsync"]
+        command: "bash"
+        args: ["helmfile/phase1/hooks/vault-init.sh"]
+
+  # ── Keycloak ───────────────────────────────────────────────────────────────
+
+  - name: keycloak
+    namespace: infra
+    chart: bitnami/keycloak
+    version: "21.4.4"
+    needs:
+      - infra/vault
+    values:
+      - values/keycloak.yaml
+    hooks:
+      - events: ["postsync"]
+        command: "bash"
+        args: ["helmfile/phase1/hooks/keycloak-configure.sh"]
+
+  # ── CIBA ACP ───────────────────────────────────────────────────────────────
+
+  - name: ciba-acp
+    namespace: infra
+    chart: ../../charts/ciba-acp
+    needs:
+      - infra/keycloak
+    values:
+      - values/ciba-acp.yaml
+
+  # ── OPA ────────────────────────────────────────────────────────────────────
+
+  - name: opa
+    namespace: infra
+    chart: opa/opa
+    version: "0.5.0"
+    needs:
+      - infra/consul
+    values:
+      - values/opa.yaml
+    hooks:
+      - events: ["postsync"]
+        command: "bash"
+        args: ["helmfile/phase1/hooks/opa-load-policies.sh"]
+
+  # ── Redis (rate limiting) ──────────────────────────────────────────────────
+
+  - name: redis
+    namespace: infra
+    chart: bitnami/redis
+    version: "19.3.2"
+    values:
+      - values/redis.yaml
+
+  # ── Security Gateway ───────────────────────────────────────────────────────
+
+  - name: security-gateway
+    namespace: infra
+    chart: ../../charts/security-gateway
+    needs:
+      - infra/opa
+      - infra/consul
+      - infra/redis
+      - spire-system/spire
+    values:
+      - values/gateway.yaml
+
+  # ── Observability ──────────────────────────────────────────────────────────
+
+  - name: otel-collector
+    namespace: observability
+    chart: open-telemetry/opentelemetry-collector
+    version: "0.82.0"
+    values:
+      - values/otel-collector.yaml
+
+  - name: loki
+    namespace: observability
+    chart: grafana/loki-stack
+    version: "2.10.2"
+    needs:
+      - observability/otel-collector
+    values:
+      - values/loki.yaml
+
+  - name: grafana
+    namespace: observability
+    chart: grafana/grafana
+    version: "7.3.7"
+    needs:
+      - observability/loki
+    values:
+      - values/grafana.yaml
+
+  # ── Agents ─────────────────────────────────────────────────────────────────
+
+  - name: agents
+    namespace: agents
+    chart: ../../charts/agents
+    needs:
+      - infra/security-gateway
+      - infra/keycloak
+      - spire-system/spire
+      - observability/otel-collector
+    values:
+      - values/agents.yaml

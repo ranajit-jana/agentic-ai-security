@@ -1,0 +1,58 @@
+global:
+  enabled: true
+  tlsDisable: false
+
+server:
+  image:
+    repository: hashicorp/vault
+    tag: "1.15.4"
+
+  nodeSelector:
+    role: application
+
+  ha:
+    enabled: false
+
+  standalone:
+    enabled: true
+    config: |
+      ui = true
+
+      listener "tcp" {
+        tls_disable = 1
+        address     = "[::]:8200"
+        cluster_address = "[::]:8201"
+      }
+
+      storage "file" {
+        path = "/vault/data"
+      }
+
+      seal "awskms" {
+        region     = "us-east-1"
+        kms_key_id = "alias/vault-unseal"
+      }
+
+  serviceAccount:
+    create: true
+    name: vault
+    annotations:
+      # EKS Pod Identity association is created by 02_eks_cluster.sh
+      eks.amazonaws.com/role-arn: ""
+
+  dataStorage:
+    enabled: true
+    size: 10Gi
+    storageClass: gp2
+
+  auditStorage:
+    enabled: true
+    size: 5Gi
+    storageClass: gp2
+
+ui:
+  enabled: true
+  serviceType: ClusterIP
+
+injector:
+  enabled: false

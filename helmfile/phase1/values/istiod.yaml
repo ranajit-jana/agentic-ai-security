@@ -1,0 +1,28 @@
+pilot:
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+  nodeSelector:
+    role: system
+
+meshConfig:
+  accessLogFile: /dev/stdout
+  accessLogEncoding: JSON
+  enableTracing: true
+  defaultConfig:
+    tracing:
+      zipkin:
+        address: otel-collector.observability.svc.cluster.local:9411
+
+global:
+  proxy:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+  mtls:
+    enabled: true

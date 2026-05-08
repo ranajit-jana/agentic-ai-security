@@ -1,0 +1,31 @@
+image:
+  repository: ""   # set to ECR_REGISTRY/agentic/ciba-acp at deploy time
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+nodeSelector:
+  role: application
+
+service:
+  type: ClusterIP
+  port: 8000
+
+serviceAccount:
+  name: ciba-acp
+
+env:
+  KEYCLOAK_URL: "http://keycloak.infra.svc.cluster.local"
+  KEYCLOAK_REALM: "firm-internal"
+  SNS_TOPIC_ARN: ""   # injected from scripts/.env at deploy time
+  AWS_REGION: "us-east-1"
+  LOG_LEVEL: "INFO"
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi

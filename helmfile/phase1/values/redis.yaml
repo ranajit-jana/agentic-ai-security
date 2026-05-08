@@ -1,0 +1,24 @@
+architecture: standalone
+
+auth:
+  enabled: true
+  # Password injected from Vault at deploy time
+  password: ""
+
+master:
+  nodeSelector:
+    role: application
+  persistence:
+    enabled: true
+    size: 5Gi
+    storageClass: gp2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+replica:
+  replicaCount: 0

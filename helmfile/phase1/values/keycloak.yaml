@@ -1,0 +1,57 @@
+auth:
+  adminUser: admin
+  # Password injected from Vault secret at deploy time via helm --set
+  adminPassword: ""
+
+replicaCount: 2
+
+nodeSelector:
+  role: application
+
+postgresql:
+  enabled: true
+  auth:
+    database: keycloak
+    username: keycloak
+    # Password injected from Vault secret
+    password: ""
+  primary:
+    nodeSelector:
+      role: application
+    persistence:
+      size: 10Gi
+      storageClass: gp2
+
+service:
+  type: ClusterIP
+  ports:
+    http: 80
+    https: 443
+
+ingress:
+  enabled: true
+  ingressClassName: alb
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    # ACM_CERT_ARN set by 01_aws_infra.sh
+    alb.ingress.kubernetes.io/certificate-arn: ""
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+  hostname: auth.firm.internal
+
+extraEnvVars:
+  - name: KC_FEATURES
+    value: "ciba,par,dpop"
+  - name: KC_HTTP_RELATIVE_PATH
+    value: "/"
+  - name: KC_PROXY
+    value: "edge"
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    cpu: 2000m
+    memory: 2Gi
