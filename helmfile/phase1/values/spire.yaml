@@ -1,33 +1,50 @@
 global:
   spire:
-    trustDomain: "firm.internal"
-    clusterName: "agentic-security"
+    trustDomain: firm.internal
+    clusterName: agentic-security
 
 spire-server:
-  replicaCount: 1
   nodeSelector:
     role: system
-  dataStore:
-    sql:
-      databaseType: sqlite3
-      connectionString: "/run/spire/data/datastore.sqlite3"
+  replicaCount: 1
+  ca:
+    keyType: ec-p256
+    subject:
+      country: US
+      organization: firm.internal
+  controllerManager:
+    enabled: true
+  federation:
+    enabled: false
+
+  # k8s_sat node attestor — cloud-agnostic, works on any K8s
   nodeAttestor:
-    k8sPsat:
+    k8sPSAT:
       enabled: true
       serviceAccountAllowList:
-        - "spire-system:spire-agent"
-  keyManager:
-    disk:
-      enabled: true
-  caKeyType: "ec-p256"
-  caTTL: "24h"
-  defaultSVIDTTL: "1h"
+        - spire-system:spire-agent
 
-spire-agent:
-  nodeAttestor:
-    k8sPsat:
-      enabled: true
-  workloadAttestors:
+  # Workload attestor identifies pods by namespace + service account
+  workloadAttestor:
     k8s:
       enabled: true
-  socketPath: /run/spire/sockets/agent.sock
+
+  # SPIRE entries for agent workloads registered via postsync hook
+
+spire-agent:
+  nodeSelector: {}
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+spiffe-oidc-discovery-provider:
+  enabled: true
+  nodeSelector:
+    role: system
+
+spiffe-csi-driver:
+  enabled: true

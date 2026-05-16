@@ -1,0 +1,89 @@
+ecrRegistry: ""
+imageTag: "0.1.0"
+imagePullPolicy: IfNotPresent
+
+nodeSelector:
+  role: application
+
+sharedEnv:
+  ANTHROPIC_MODEL: "claude-sonnet-4-6"
+  GATEWAY_URL: "http://security-gateway.infra.svc.cluster.local:8080"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector.observability.svc.cluster.local:4317"
+  OTEL_SERVICE_NAMESPACE: "agents"
+  TRUST_DOMAIN: "firm.internal"
+  LOG_FORMAT: "json"
+  ANTHROPIC_API_KEY: ""
+
+spireSocket:
+  hostPath: /run/spire/sockets
+
+agents:
+  orchestrator:
+    name: orchestrator-agent
+    image: agentic/orchestrator-agent
+    replicas: 2
+    serviceAccount: orchestrator-agent
+    port: 8000
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        cpu: 2000m
+        memory: 2Gi
+
+  webSearch:
+    name: web-search-agent
+    image: agentic/web-search-agent
+    replicas: 2
+    serviceAccount: web-search-agent
+    port: 8000
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+
+  internalData:
+    name: internal-data-agent
+    image: agentic/internal-data-agent
+    replicas: 2
+    serviceAccount: internal-data-agent
+    port: 8000
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+
+  reportGeneration:
+    name: report-generation-agent
+    image: agentic/report-generation-agent
+    replicas: 2
+    serviceAccount: report-generation-agent
+    port: 8000
+    resources:
+      requests:
+        cpu: 300m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+
+  email:
+    name: email-agent
+    image: agentic/email-agent
+    replicas: 1
+    serviceAccount: email-agent
+    port: 8000
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi

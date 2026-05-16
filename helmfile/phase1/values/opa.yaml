@@ -1,46 +1,30 @@
 replicaCount: 2
 
 nodeSelector:
-  role: application
+  role: system
 
-image:
-  repository: openpolicyagent/opa
-  tag: "0.63.0-rootless"
+# OPA runs as a sidecar-style service; OPAL keeps policies in sync
+opa:
+  enabled: true
 
-args:
-  - "run"
-  - "--server"
-  - "--addr=0.0.0.0:8181"
-  - "--diagnostic-addr=0.0.0.0:8282"
-  - "--log-format=json"
-  - "--log-level=info"
-  - "--set=decision_logs.console=true"
+# Policy loaded via opa-load-policies.sh hook after deploy
+# OPAL sidecar watches Consul KV for policy updates
 
 mgmt:
   enabled: true
-  data:
+  configmapPolicies:
     enabled: true
-  policies:
-    enabled: true
+    namespaces: [infra]
+    requireLabel: true
 
-sar:
-  enabled: false
-
-authz:
-  enabled: false
-
-deploymentStrategy:
-  rollingUpdate:
-    maxUnavailable: 1
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
 
 service:
   type: ClusterIP
   port: 8181
-
-resources:
-  requests:
-    cpu: 200m
-    memory: 256Mi
-  limits:
-    cpu: 1000m
-    memory: 512Mi

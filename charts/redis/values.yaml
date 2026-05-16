@@ -1,0 +1,20 @@
+image:
+  repository: redis
+  tag: "7.4.3-alpine3.21"
+  pullPolicy: IfNotPresent
+
+nodeSelector: {}
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+storage: 4Gi
+storageClass: gp2-csi
+
+service:
+  port: 6379

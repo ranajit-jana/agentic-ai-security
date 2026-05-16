@@ -1,58 +1,63 @@
 global:
   enabled: true
-  tlsDisable: false
+  tlsDisable: true
+
+injector:
+  enabled: false   # using EKS Pod Identity, not Vault agent injector
 
 server:
-  image:
-    repository: hashicorp/vault
-    tag: "1.15.4"
-
   nodeSelector:
-    role: application
+    role: system
+
+  affinity: ""
+
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  # AWS KMS auto-unseal — no manual unseal needed on pod restart
+  extraEnvironmentVars:
+    VAULT_SEAL_TYPE: awskms
+    VAULT_AWSKMS_SEAL_KEY_ID: "09bab559-b3ab-45f4-a437-d3b32aed7fbc"
+    AWS_REGION: "ap-south-1"
 
   ha:
-    enabled: false
-
-  standalone:
     enabled: true
-    config: |
-      ui = true
+    replicas: 3
+    raft:
+      enabled: true
+      setNodeId: true
+      config: |
+        ui = true
 
-      listener "tcp" {
-        tls_disable = 1
-        address     = "[::]:8200"
-        cluster_address = "[::]:8201"
-      }
+        listener "tcp" {
+          tls_disable = 1
+          address     = "[::]:8200"
+          cluster_address = "[::]:8201"
+        }
 
-      storage "file" {
-        path = "/vault/data"
-      }
+        seal "awskms" {
+          region     = "ap-south-1"
+          kms_key_id = "09bab559-b3ab-45f4-a437-d3b32aed7fbc"
+        }
 
-      seal "awskms" {
-        region     = "us-east-1"
-        kms_key_id = "alias/vault-unseal"
-      }
+        storage "raft" {
+          path    = "/vault/data"
+        }
+
+        service_registration "kubernetes" {}
 
   serviceAccount:
     create: true
     name: vault
     annotations:
-      # EKS Pod Identity association is created by 02_eks_cluster.sh
+      # EKS Pod Identity binds vault-unseal-role to this service account
       eks.amazonaws.com/role-arn: ""
-
-  dataStorage:
-    enabled: true
-    size: 10Gi
-    storageClass: gp2
-
-  auditStorage:
-    enabled: true
-    size: 5Gi
-    storageClass: gp2
 
 ui:
   enabled: true
   serviceType: ClusterIP
-
-injector:
-  enabled: false

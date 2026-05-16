@@ -1,0 +1,40 @@
+image:
+  repository: ""
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+nodeSelector:
+  role: application
+
+service:
+  type: ClusterIP
+  port: 8080
+
+serviceAccount:
+  name: security-gateway
+
+env:
+  OPA_URL: "http://opa.infra.svc.cluster.local:8181"
+  CONSUL_URL: "http://consul.infra.svc.cluster.local:8500"
+  REDIS_URL: "redis://redis-master.infra.svc.cluster.local:6379"
+  OLLAMA_URL: "http://ollama.agents.svc.cluster.local:11434"
+  JUDGE_MODEL: "llama3.1:8b"
+  JUDGE_CONFIDENCE_THRESHOLD: "0.7"
+  TRUST_DOMAIN: "firm.internal"
+  LOG_FORMAT: "json"
+  LOG_LEVEL: "INFO"
+  AUDIT_LOKI_URL: "http://loki.observability.svc.cluster.local:3100"
+
+spireSocket:
+  enabled: true
+  hostPath: /run/spire/sockets
+
+resources:
+  requests:
+    cpu: 300m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi

@@ -1,0 +1,155 @@
+========================================================
+  AGENTIC AI SECURITY — PHASE 1 SETUP GUIDE
+========================================================
+
+── PREREQUISITES ────────────────────────────────────────
+Install these tools before running any scripts:
+
+  aws CLI       https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html
+  eksctl        https://eksctl.io/installation/
+  kubectl       https://kubernetes.io/docs/tasks/tools/
+  helmfile      https://github.com/helmfile/helmfile/releases  (v1.5.1)
+
+Configure AWS:
+  aws configure
+  # Set region: ap-south-1
+  # Credentials must allow: EKS, EC2, IAM, KMS, ECR, SNS
+
+── DEPLOY ORDER ─────────────────────────────────────────
+Run these scripts in order:
+
+  Step 1:  bash scripts/01_aws_infra.sh
+  Step 2:  bash scripts/02_eks_cluster.sh
+  Step 3:  bash scripts/03_kubeconfig.sh
+  Step 4:  bash scripts/04_helmfile_deploy.sh
+
+Step 4 will pause at the Vault hook and require a manual
+step (see VAULT INIT section below).
+
+── WHAT EACH SCRIPT DOES ────────────────────────────────
+
+01_aws_infra.sh
+  - KMS key (alias/vault-unseal) for Vault auto-unseal
+  - ECR repos for all agent and gateway images
+  - SNS topics: ciba-approvals, security-alerts
+  - IAM roles: vault-unseal-role, ciba-acp-role, ecr-puller-role
+
+02_eks_cluster.sh
+  - EKS cluster "agentic-security" (Kubernetes 1.35)
+  - 3 nodegroups:
+      system       t3.medium  3 nodes  role=system       (all infra)
+      application  t3.large   2 nodes  role=application  (agents)
+      observability t3.medium 1 node   role=observability (monitoring)
+  - Installs helm v3.21.0 to ~/.local/bin
+  - Attaches AmazonEBSCSIDriverPolicy to node roles
+  - Installs aws-ebs-csi-driver via Helm
+  - Creates gp2-csi StorageClass (EBS CSI, set as default)
+  - Binds EKS Pod Identity for vault and ciba-acp
+
+03_kubeconfig.sh
+  - Configures kubectl to point at the cluster
+  - Verifies node connectivity
+
+04_helmfile_deploy.sh
+  - Installs helm, helm-diff plugin, helmfile if missing
+  - Adds all Helm chart repositories
+  - Runs: helmfile sync (deploys all Phase 1 releases)
+
+── VAULT INIT (manual step required) ───────────────────
+Vault cannot self-initialise. The hook in 04_helmfile_deploy.sh
+handles this automatically, but you must save the output.
+
+When the vault hook runs, it will print 5 recovery keys
+and 1 root token. You MUST save these before pressing Enter.
+
+If the hook fails and you need to run it manually:
+
+  1. Check vault-0 is Running (not necessarily Ready):
+       kubectl get pods -n infra -l app.kubernetes.io/name=vault
+
+  2. Initialise vault:
+       kubectl exec -n infra vault-0 -- vault operator init \
+         -recovery-shares=5 \
+         -recovery-threshold=3
+
+     SAVE ALL 5 RECOVERY KEYS + ROOT TOKEN IN A PASSWORD MANAGER.
+     Recovery keys = disaster recovery only (if KMS key is lost).
+     KMS handles day-to-day auto-unseal automatically.
+
+  3. Check vault auto-unsealed (~30s after init):
+       kubectl exec -n infra vault-0 -- vault status
+     Expected: Initialized=true  Sealed=false
+
+  4. Enable backends:
+       kubectl exec -n infra vault-0 -- vault auth enable kubernetes
+       kubectl exec -n infra vault-0 -- vault secrets enable -path=secret kv-v2
+
+  5. Continue helmfile:
+       bash scripts/04_helmfile_deploy.sh
+
+── CONSUL ACL TOKEN ─────────────────────────────────────
+Consul runs with ACLs enabled. The bootstrap token is
+automatically stored in a Kubernetes secret.
+
+  Retrieve:
+    kubectl get secret consul-bootstrap-acl-token -n infra \
+      -o jsonpath='{.data.token}' | base64 -d
+
+  Export for manual CLI use:
+    export CONSUL_HTTP_TOKEN=$(kubectl get secret consul-bootstrap-acl-token \
+      -n infra -o jsonpath='{.data.token}' | base64 -d)
+
+  The consul-seed-registries.sh hook reads this automatically.
+
+── VALIDATE ─────────────────────────────────────────────
+After all releases are deployed and vault is initialised:
+
+  bash scripts/validate_phase1.sh
+
+── NODEGROUPS ───────────────────────────────────────────
+  system        t3.medium  3 nodes (min 3, max 4)  role=system
+  application   t3.large   2 nodes (min 2, max 4)  role=application
+  observability t3.medium  1 node  (min 1, max 2)  role=observability
+
+  Workload placement:
+    system:        istiod, spire, consul, vault, keycloak,
+                   opa, redis, security-gateway, ciba-acp
+    application:   all AI agents
+    observability: otel-collector, loki, grafana
+
+  Scale system nodegroup if pods are evicted/OOMKilled:
+    eksctl scale nodegroup --cluster agentic-security \
+      --region ap-south-1 --name system --nodes 4
+
+── DESTROY (stop billing) ───────────────────────────────
+  bash scripts/destroy.sh
+
+  Keeps: KMS key, ECR, SNS, IAM roles
+  Deletes: EKS cluster, EC2 nodes, NAT gateway
+
+── KEY AWS RESOURCES ────────────────────────────────────
+  KMS alias : alias/vault-unseal
+  Region    : ap-south-1
+  Account   : 923373850235
+
+── CUSTOM IMAGE TAGS ────────────────────────────────────
+The following charts use images you build and push to ECR.
+Default tag in values files: 0.1.0
+Override at deploy time or update the values file:
+
+  charts/security-gateway  → ECR: agentic/security-gateway
+  charts/ciba-acp          → ECR: agentic/ciba-acp
+  charts/agents            → ECR: agentic/orchestrator-agent etc.
+
+  Push images:
+    aws ecr get-login-password --region ap-south-1 \
+      | docker login --username AWS \
+        --password-stdin 923373850235.dkr.ecr.ap-south-1.amazonaws.com
+
+    docker build -t agentic/security-gateway:0.1.0 .
+    docker tag agentic/security-gateway:0.1.0 \
+      923373850235.dkr.ecr.ap-south-1.amazonaws.com/agentic/security-gateway:0.1.0
+    docker push \
+      923373850235.dkr.ecr.ap-south-1.amazonaws.com/agentic/security-gateway:0.1.0
+
+========================================================

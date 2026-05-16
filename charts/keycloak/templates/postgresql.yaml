@@ -1,0 +1,76 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: keycloak-postgresql
+  namespace: {{ .Release.Namespace }}
+type: Opaque
+stringData:
+  password: {{ .Values.postgresql.password | quote }}
+  POSTGRES_PASSWORD: {{ .Values.postgresql.password | quote }}
+  POSTGRES_USER: {{ .Values.postgresql.username | quote }}
+  POSTGRES_DB: {{ .Values.postgresql.database | quote }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: keycloak-postgresql
+  namespace: {{ .Release.Namespace }}
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: {{ .Values.postgresql.storageClass }}
+  resources:
+    requests:
+      storage: {{ .Values.postgresql.storage }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: keycloak-postgresql
+  namespace: {{ .Release.Namespace }}
+spec:
+  serviceName: keycloak-postgresql
+  replicas: 1
+  selector:
+    matchLabels:
+      app: keycloak-postgresql
+  template:
+    metadata:
+      labels:
+        app: keycloak-postgresql
+    spec:
+      nodeSelector: {{ toYaml .Values.postgresql.nodeSelector | nindent 8 }}
+      containers:
+        - name: postgresql
+          image: "{{ .Values.postgresql.image.repository }}:{{ .Values.postgresql.image.tag }}"
+          imagePullPolicy: {{ .Values.postgresql.image.pullPolicy }}
+          ports:
+            - containerPort: 5432
+          envFrom:
+            - secretRef:
+                name: keycloak-postgresql
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+              subPath: pgdata
+          resources: {{ toYaml .Values.postgresql.resources | nindent 12 }}
+          readinessProbe:
+            exec:
+              command: [pg_isready, -U, {{ .Values.postgresql.username | quote }}]
+            initialDelaySeconds: 10
+            periodSeconds: 5
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: keycloak-postgresql
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak-postgresql
+  namespace: {{ .Release.Namespace }}
+spec:
+  selector:
+    app: keycloak-postgresql
+  ports:
+    - port: 5432
+      targetPort: 5432

@@ -1,0 +1,190 @@
+repositories:
+  - name: istio
+    url: https://istio-release.storage.googleapis.com/charts
+  - name: spiffe
+    url: https://spiffe.github.io/helm-charts-hardened
+  - name: hashicorp
+    url: https://helm.releases.hashicorp.com
+  - name: opa
+    url: https://open-policy-agent.github.io/kube-mgmt/charts
+  - name: open-telemetry
+    url: https://open-telemetry.github.io/opentelemetry-helm-charts
+  - name: grafana
+    url: https://grafana.github.io/helm-charts
+
+helmDefaults:
+  wait: true
+  timeout: 300
+  createNamespace: true
+
+releases:
+
+  # ── Istio ────────────────────────────────────────────────────────────────
+
+  - name: istio-base
+    namespace: istio-system
+    chart: istio/base
+    values:
+      - values/istio-base.yaml
+
+  - name: istiod
+    namespace: istio-system
+    chart: istio/istiod
+    needs:
+      - istio-system/istio-base
+    values:
+      - values/istiod.yaml
+    hooks:
+      - events: ["postsync"]
+        command: "kubectl"
+        args:
+          - apply
+          - -f
+          - {{ env "REPO_ROOT" }}/helmfile/phase1/manifests/peer-authentication-strict.yaml
+
+  # ── SPIRE ─────────────────────────────────────────────────────────────────
+
+  - name: spire-crds
+    namespace: spire-system
+    chart: spiffe/spire-crds
+    needs:
+      - istio-system/istiod
+
+  - name: spire
+    namespace: spire-system
+    chart: spiffe/spire
+    needs:
+      - spire-system/spire-crds
+    values:
+      - values/spire.yaml
+    hooks:
+      - events: ["postsync"]
+        command: "bash"
+        args: ["{{ env "REPO_ROOT" }}/helmfile/phase1/hooks/spire-register-entries.sh"]
+
+  # ── Consul ────────────────────────────────────────────────────────────────
+
+  - name: consul
+    namespace: infra
+    chart: hashicorp/consul
+    needs:
+      - spire-system/spire
+    values:
+      - values/consul.yaml
+    hooks:
+      - events: ["postsync"]
+        command: "bash"
+        args: ["{{ env "REPO_ROOT" }}/helmfile/phase1/hooks/consul-seed-registries.sh"]
+      - events: ["postsync"]
+        command: "bash"
+        args: ["{{ env "REPO_ROOT" }}/helmfile/phase1/hooks/consul-coredns-patch.sh"]
+
+  # ── Vault ─────────────────────────────────────────────────────────────────
+
+  - name: vault
+    namespace: infra
+    chart: hashicorp/vault
+    needs:
+      - infra/consul
+    values:
+      - values/vault.yaml
+    hooks:
+      - events: ["postsync"]
+        command: "bash"
+        args: ["{{ env "REPO_ROOT" }}/helmfile/phase1/hooks/vault-init.sh"]
+
+  # ── Keycloak ──────────────────────────────────────────────────────────────
+
+  - name: keycloak
+    namespace: infra
+    chart: ../../charts/keycloak
+    needs:
+      - infra/vault
+    values:
+      - values/keycloak.yaml
+    hooks:
+      - events: ["postsync"]
+        command: "bash"
+        args: ["{{ env "REPO_ROOT" }}/helmfile/phase1/hooks/keycloak-configure.sh"]
+
+  # ── CIBA ACP ──────────────────────────────────────────────────────────────
+
+  - name: ciba-acp
+    namespace: infra
+    chart: ../../charts/ciba-acp
+    needs:
+      - infra/keycloak
+    values:
+      - values/ciba-acp.yaml
+
+  # ── OPA ───────────────────────────────────────────────────────────────────
+
+  - name: opa
+    namespace: infra
+    chart: opa/opa
+    needs:
+      - infra/consul
+    values:
+      - values/opa.yaml
+    hooks:
+      - events: ["postsync"]
+        command: "bash"
+        args: ["{{ env "REPO_ROOT" }}/helmfile/phase1/hooks/opa-load-policies.sh"]
+
+  # ── Redis (rate limiting) ─────────────────────────────────────────────────
+
+  - name: redis
+    namespace: infra
+    chart: ../../charts/redis
+    values:
+      - values/redis.yaml
+
+  # ── Security Gateway ──────────────────────────────────────────────────────
+
+  - name: security-gateway
+    namespace: infra
+    chart: ../../charts/security-gateway
+    needs:
+      - infra/opa
+      - infra/consul
+      - infra/redis
+      - spire-system/spire
+    values:
+      - values/gateway.yaml
+
+  # ── Observability ─────────────────────────────────────────────────────────
+
+  - name: otel-collector
+    namespace: observability
+    chart: open-telemetry/opentelemetry-collector
+    values:
+      - values/otel-collector.yaml
+
+  - name: loki
+    namespace: observability
+    chart: grafana/loki-stack
+    needs:
+      - observability/otel-collector
+    values:
+      - values/loki.yaml
+
+  - name: grafana
+    namespace: observability
+    chart: grafana/grafana
+    needs:
+      - observability/loki
+    values:
+      - values/grafana.yaml
+
+  # ── Agents ────────────────────────────────────────────────────────────────
+
+  - name: agents
+    namespace: agents
+    chart: ../../charts/agents
+    needs:
+      - infra/security-gateway
+      - infra/keycloak
+      - spire-system/spire
+      - observability/otel-collector
+    values:
+      - values/agents.yaml

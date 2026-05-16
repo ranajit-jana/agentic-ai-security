@@ -1,28 +1,21 @@
 pilot:
-  resources:
-    requests:
-      cpu: 200m
-      memory: 256Mi
-  nodeSelector:
-    role: system
+  env:
+    PILOT_ENABLE_WORKLOAD_ENTRY_AUTOREGISTRATION: "true"
 
 meshConfig:
-  accessLogFile: /dev/stdout
-  accessLogEncoding: JSON
-  enableTracing: true
   defaultConfig:
-    tracing:
-      zipkin:
-        address: otel-collector.observability.svc.cluster.local:9411
+    proxyMetadata:
+      ISTIO_META_DNS_CAPTURE: "true"
+  enableTracing: true
+  extensionProviders:
+    - name: otel
+      opentelemetry:
+        service: otel-collector.observability.svc.cluster.local
+        port: 4317
 
 global:
-  proxy:
-    resources:
-      requests:
-        cpu: 50m
-        memory: 64Mi
-      limits:
-        cpu: 200m
-        memory: 256Mi
-  mtls:
-    enabled: true
+  meshID: firm-internal
+  network: ""
+
+nodeSelector:
+  role: system

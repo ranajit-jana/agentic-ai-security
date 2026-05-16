@@ -1,7 +1,11 @@
 replicaCount: 1
 
-nodeSelector:
-  role: system
+image:
+  repository: quay.io/keycloak/keycloak
+  tag: "26.2.5"
+  pullPolicy: IfNotPresent
+
+nodeSelector: {}
 
 resources:
   requests:
@@ -11,11 +15,16 @@ resources:
     cpu: 1500m
     memory: 2Gi
 
-adminUser: admin
-adminPassword: "changeme-set-via-vault"
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
 
 ingress:
   enabled: false
+  className: alb
+  annotations: {}
+  hostname: auth.firm.internal
 
 env:
   KC_FEATURES: "ciba,par,dpop"
@@ -24,6 +33,9 @@ env:
   KC_HTTP_ENABLED: "true"
   KC_DB: postgres
   KC_DB_URL: "jdbc:postgresql://keycloak-postgresql:5432/keycloak"
+
+adminUser: admin
+adminPassword: "changeme-set-via-vault"
 
 postgresql:
   enabled: true
@@ -36,8 +48,7 @@ postgresql:
   password: "changeme-set-via-vault"
   storage: 8Gi
   storageClass: gp2-csi
-  nodeSelector:
-    role: system
+  nodeSelector: {}
   resources:
     requests:
       cpu: 100m

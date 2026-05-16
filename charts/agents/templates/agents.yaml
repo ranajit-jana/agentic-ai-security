@@ -1,0 +1,88 @@
+{{- range $key, $agent := .Values.agents }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $agent.serviceAccount }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app: {{ $agent.name }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $agent.name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app: {{ $agent.name }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ $agent.port }}
+      targetPort: {{ $agent.port }}
+      protocol: TCP
+  selector:
+    app: {{ $agent.name }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $agent.name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app: {{ $agent.name }}
+spec:
+  replicas: {{ $agent.replicas }}
+  selector:
+    matchLabels:
+      app: {{ $agent.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ $agent.name }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ $agent.port | quote }}
+    spec:
+      serviceAccountName: {{ $agent.serviceAccount }}
+      nodeSelector:
+        {{- toYaml $.Values.nodeSelector | nindent 8 }}
+      volumes:
+        - name: spire-agent-socket
+          hostPath:
+            path: {{ $.Values.spireSocket.hostPath }}
+            type: DirectoryOrCreate
+      containers:
+        - name: {{ $agent.name }}
+          image: "{{ $.Values.ecrRegistry }}/{{ $agent.image }}:{{ $.Values.imageTag }}"
+          imagePullPolicy: {{ $.Values.imagePullPolicy }}
+          ports:
+            - containerPort: {{ $agent.port }}
+          env:
+            - name: AGENT_TYPE
+              value: {{ $agent.name | quote }}
+            - name: SPIRE_SOCKET
+              value: "/run/spire/sockets/agent.sock"
+            {{- range $envKey, $envVal := $.Values.sharedEnv }}
+            - name: {{ $envKey }}
+              value: {{ $envVal | quote }}
+            {{- end }}
+          volumeMounts:
+            - name: spire-agent-socket
+              mountPath: /run/spire/sockets
+              readOnly: true
+          resources:
+            {{- toYaml $agent.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ $agent.port }}
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ $agent.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+{{- end }}

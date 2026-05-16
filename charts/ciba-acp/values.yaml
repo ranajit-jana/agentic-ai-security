@@ -1,12 +1,12 @@
 image:
-  repository: "923373850235.dkr.ecr.ap-south-1.amazonaws.com/agentic/ciba-acp"
+  repository: ""
   tag: "0.1.0"
   pullPolicy: IfNotPresent
 
 replicaCount: 2
 
 nodeSelector:
-  role: system
+  role: application
 
 service:
   type: ClusterIP
@@ -18,10 +18,9 @@ serviceAccount:
 env:
   KEYCLOAK_URL: "http://keycloak.infra.svc.cluster.local"
   KEYCLOAK_REALM: "firm-internal"
-  SNS_TOPIC_ARN: "arn:aws:sns:ap-south-1:923373850235:ciba-approvals"
-  AWS_REGION: "ap-south-1"
+  SNS_TOPIC_ARN: ""
+  AWS_REGION: "us-east-1"
   LOG_LEVEL: "INFO"
-  LOG_FORMAT: "json"
 
 resources:
   requests:

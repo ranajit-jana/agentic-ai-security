@@ -71,7 +71,7 @@ log "SNS topics: ciba-approvals=$CIBA_TOPIC, security-alerts=$ALERT_TOPIC"
 log "Creating IAM roles for EKS Pod Identity..."
 
 create_pod_identity_role "vault-unseal-role" \
-  "{\"Effect\":\"Allow\",\"Action\":[\"kms:Decrypt\",\"kms:DescribeKey\"],\"Resource\":\"arn:aws:kms:${REGION}:${ACCOUNT_ID}:key/${KMS_KEY_ID}\"}"
+  "{\"Effect\":\"Allow\",\"Action\":[\"kms:Encrypt\",\"kms:Decrypt\",\"kms:DescribeKey\",\"kms:GenerateDataKey\"],\"Resource\":\"arn:aws:kms:${REGION}:${ACCOUNT_ID}:key/${KMS_KEY_ID}\"}"
 
 create_pod_identity_role "ciba-acp-role" \
   "{\"Effect\":\"Allow\",\"Action\":\"sns:Publish\",\"Resource\":\"${CIBA_TOPIC}\"}"
@@ -79,19 +79,14 @@ create_pod_identity_role "ciba-acp-role" \
 create_pod_identity_role "ecr-puller-role" \
   "{\"Effect\":\"Allow\",\"Action\":[\"ecr:GetDownloadUrlForLayer\",\"ecr:BatchGetImage\",\"ecr:GetAuthorizationToken\"],\"Resource\":\"*\"}"
 
-# ── ACM certificate prompt ────────────────────────────────────────────────────
+# ── ACM certificate ───────────────────────────────────────────────────────────
 
-echo ""
-echo "══════════════════════════════════════════════════════════════════════"
-echo " MANUAL STEP 2 — ACM Certificate"
-echo " If you have not done so, request a certificate in ACM for:"
-echo "   auth.firm.internal"
-echo "   portal.firm.internal"
-echo " Then export the ARN:"
-echo "   export ACM_CERT_ARN=arn:aws:acm:${REGION}:${ACCOUNT_ID}:certificate/..."
-echo " Or set it via: save_env ACM_CERT_ARN <arn> in scripts/.env"
-echo "══════════════════════════════════════════════════════════════════════"
-echo ""
+# ── ACM certificate skipped ───────────────────────────────────────────────────
+# Keycloak ALB uses HTTP for now. Add a cert later with:
+#   aws acm request-certificate --domain-name auth.rj-lab.click \
+#     --subject-alternative-names portal.rj-lab.click --validation-method DNS
+# Then set ACM_CERT_ARN in scripts/.env and update keycloak.yaml ingress annotations.
+log "Skipping ACM certificate — Keycloak ALB will use HTTP"
 
 log "AWS infrastructure ready"
 log "Saved environment to scripts/.env — source it or run scripts in order"

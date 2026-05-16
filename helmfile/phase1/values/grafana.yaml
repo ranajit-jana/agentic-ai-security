@@ -1,0 +1,44 @@
+nodeSelector:
+  role: observability
+
+adminUser: admin
+adminPassword: "changeme-set-via-vault"
+
+persistence:
+  enabled: true
+  size: 5Gi
+  storageClassName: gp2-csi
+
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      - name: Loki
+        type: loki
+        url: http://loki.observability.svc.cluster.local:3100
+        access: proxy
+        isDefault: true
+
+dashboardProviders:
+  dashboardproviders.yaml:
+    apiVersion: 1
+    providers:
+      - name: default
+        orgId: 1
+        folder: Agentic Security
+        type: file
+        disableDeletion: false
+        options:
+          path: /var/lib/grafana/dashboards/default
+
+service:
+  type: ClusterIP
+  port: 80
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi

@@ -1,0 +1,32 @@
+loki:
+  enabled: true
+  nodeSelector:
+    role: observability
+  persistence:
+    enabled: true
+    size: 20Gi
+    storageClassName: gp2-csi
+  config:
+    auth_enabled: false
+    schema_config:
+      configs:
+        - from: "2024-01-01"
+          store: boltdb-shipper
+          object_store: filesystem
+          schema: v11
+          index:
+            prefix: index_
+            period: 24h
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+promtail:
+  enabled: true
+  config:
+    clients:
+      - url: http://loki.observability.svc.cluster.local:3100/loki/api/v1/push

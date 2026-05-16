@@ -1,0 +1,6 @@
+apiVersion: v2
+name: ciba-acp
+description: CIBA Authentication Channel Provider — routes Keycloak approval notifications to SMS (AWS SNS) or Duo Mobile
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

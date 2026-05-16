@@ -1,0 +1,6 @@
+apiVersion: v2
+name: security-gateway
+description: Agentic AI Security Gateway — coordinates OPA, LLM judge, Biscuit verification, and audit logging for every agent tool call
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
