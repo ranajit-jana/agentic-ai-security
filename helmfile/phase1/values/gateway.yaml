@@ -1,7 +1,7 @@
 image:
   repository: "923373850235.dkr.ecr.ap-south-1.amazonaws.com/agentic/security-gateway"
   tag: "0.1.0"
-  pullPolicy: IfNotPresent
+  pullPolicy: Always
 
 replicaCount: 2
 
@@ -29,7 +29,7 @@ env:
 
 spireSocket:
   enabled: true
-  hostPath: /run/spire/sockets
+  hostPath: /tmp/spire-agent/public
 
 resources:
   requests:

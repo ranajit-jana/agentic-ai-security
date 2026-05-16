@@ -1,6 +1,6 @@
 ecrRegistry: "923373850235.dkr.ecr.ap-south-1.amazonaws.com"
 imageTag: "0.1.0"
-imagePullPolicy: IfNotPresent
+imagePullPolicy: Always
 
 nodeSelector:
   role: application
@@ -16,7 +16,7 @@ sharedEnv:
   ANTHROPIC_API_KEY: ""
 
 spireSocket:
-  hostPath: /run/spire/sockets
+  hostPath: /tmp/spire-agent/public
 
 agents:
   orchestrator:
@@ -27,11 +27,11 @@ agents:
     port: 8000
     resources:
       requests:
-        cpu: 500m
-        memory: 1Gi
+        cpu: 200m
+        memory: 512Mi
       limits:
-        cpu: 2000m
-        memory: 2Gi
+        cpu: 1000m
+        memory: 1Gi
 
   webSearch:
     name: web-search-agent
@@ -41,11 +41,11 @@ agents:
     port: 8000
     resources:
       requests:
-        cpu: 200m
-        memory: 512Mi
+        cpu: 100m
+        memory: 256Mi
       limits:
-        cpu: 1000m
-        memory: 1Gi
+        cpu: 500m
+        memory: 512Mi
 
   internalData:
     name: internal-data-agent
@@ -55,11 +55,11 @@ agents:
     port: 8000
     resources:
       requests:
-        cpu: 200m
-        memory: 512Mi
+        cpu: 100m
+        memory: 256Mi
       limits:
-        cpu: 1000m
-        memory: 1Gi
+        cpu: 500m
+        memory: 512Mi
 
   reportGeneration:
     name: report-generation-agent
@@ -69,11 +69,11 @@ agents:
     port: 8000
     resources:
       requests:
-        cpu: 300m
-        memory: 512Mi
+        cpu: 100m
+        memory: 256Mi
       limits:
-        cpu: 1000m
-        memory: 1Gi
+        cpu: 500m
+        memory: 512Mi
 
   email:
     name: email-agent
@@ -83,8 +83,8 @@ agents:
     port: 8000
     resources:
       requests:
-        cpu: 100m
-        memory: 256Mi
+        cpu: 50m
+        memory: 128Mi
       limits:
-        cpu: 500m
-        memory: 512Mi
+        cpu: 250m
+        memory: 256Mi

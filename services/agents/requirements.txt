@@ -1,0 +1,10 @@
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+httpx==0.28.0
+anthropic==0.40.0
+pydantic==2.10.3
+pydantic-settings==2.6.1
+structlog==24.4.0
+opentelemetry-sdk==1.29.0
+opentelemetry-exporter-otlp-proto-grpc==1.29.0
+opentelemetry-instrumentation-fastapi==0.50b0

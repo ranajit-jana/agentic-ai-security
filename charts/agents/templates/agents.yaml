@@ -33,6 +33,11 @@ metadata:
     app: {{ $agent.name }}
 spec:
   replicas: {{ $agent.replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app: {{ $agent.name }}
@@ -62,7 +67,7 @@ spec:
             - name: AGENT_TYPE
               value: {{ $agent.name | quote }}
             - name: SPIRE_SOCKET
-              value: "/run/spire/sockets/agent.sock"
+              value: "/run/spire/sockets/spire-agent.sock"
             {{- range $envKey, $envVal := $.Values.sharedEnv }}
             - name: {{ $envKey }}
               value: {{ $envVal | quote }}

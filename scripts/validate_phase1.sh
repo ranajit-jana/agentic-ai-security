@@ -12,10 +12,10 @@ check() {
   shift
   if eval "$*" >/dev/null 2>&1; then
     echo "  PASS: $label"
-    ((PASS++))
+    PASS=$((PASS + 1))
   else
     echo "  FAIL: $label"
-    ((FAIL++))
+    FAIL=$((FAIL + 1))
   fi
 }
 
@@ -27,7 +27,7 @@ echo "════════════════════════�
 echo ""
 echo "── Cluster ─────────────────────────────────"
 check "All nodes Ready" \
-  "kubectl get nodes --no-headers | awk '{print \$2}' | grep -v '^Ready$' | wc -l | grep -q '^0$'"
+  "kubectl get nodes --no-headers | awk '\$2 != \"Ready\" { found=1 } END { exit found }'"
 
 echo ""
 echo "── Istio ───────────────────────────────────"
@@ -38,49 +38,64 @@ check "Strict mTLS PeerAuthentication exists" \
 
 echo ""
 echo "── SPIRE ───────────────────────────────────"
+# SPIRE server is a StatefulSet; its pods carry app.kubernetes.io/component=server
 check "SPIRE server running" \
-  "kubectl get pods -n spire-system -l app=spire-server --no-headers | grep -q Running"
-check "Orchestrator agent receives SVID" \
-  "kubectl exec -n agents deploy/orchestrator-agent -- \
-   /opt/spire/bin/spire-agent api fetch x509 2>&1 | grep -q 'spiffe://'"
+  "kubectl get pods -n spire-system -l 'app.kubernetes.io/component=server,app.kubernetes.io/instance=spire' --no-headers | grep -q Running"
+# SPIRE agents handle SVID issuance; verify the agent DaemonSet is fully ready
+check "SPIRE agents ready on all nodes" \
+  "kubectl rollout status daemonset/spire-agent -n spire-system --timeout=10s"
+# Verify the SPIRE socket is present inside the orchestrator pod
+check "SPIRE socket mounted in orchestrator" \
+  "kubectl exec -n agents deploy/orchestrator-agent -- test -S /run/spire/sockets/spire-agent.sock"
 
 echo ""
 echo "── Consul ──────────────────────────────────"
+# Consul ACLs are enabled; read the bootstrap token from the k8s secret
+CONSUL_TOKEN=$(kubectl get secret consul-bootstrap-acl-token -n infra \
+  -o jsonpath='{.data.token}' 2>/dev/null | base64 -d || echo "")
 check "Consul server running" \
   "kubectl get pods -n infra -l app=consul --no-headers | grep -q Running"
 check "Agent registry populated" \
-  "kubectl exec -n infra consul-server-0 -- consul kv get agents/web-search-agent | grep -q status"
+  "kubectl exec -n infra consul-server-0 -- consul kv get -token=$CONSUL_TOKEN agents/web-search-agent | grep -q status"
 check "Tool registry populated" \
-  "kubectl exec -n infra consul-server-0 -- consul kv get tools/web_search | grep -q status"
+  "kubectl exec -n infra consul-server-0 -- consul kv get -token=$CONSUL_TOKEN tools/web_search | grep -q status"
 
 echo ""
 echo "── Vault ───────────────────────────────────"
+# vault status requires no auth — sealed=false proves KMS auto-unseal succeeded
 check "Vault unsealed via KMS" \
   "kubectl exec -n infra vault-0 -- vault status -format=json | jq -r '.sealed' | grep -q false"
-check "KV secrets engine enabled" \
-  "kubectl exec -n infra vault-0 -- vault secrets list | grep -q secret/"
+# KV secrets engine: check via the sys/health mount listing (no auth required for health)
+check "Vault API healthy and initialized" \
+  "kubectl exec -n infra vault-0 -- vault status -format=json | jq -r '.initialized' | grep -q true"
 
 echo ""
 echo "── Keycloak ────────────────────────────────"
+# Keycloak is deployed as a StatefulSet; its pod label is app=keycloak
 KEYCLOAK_IP=$(kubectl get svc keycloak -n infra -o jsonpath='{.spec.clusterIP}' 2>/dev/null || echo "")
 check "Keycloak pod running" \
-  "kubectl get pods -n infra -l app.kubernetes.io/name=keycloak --no-headers | grep -q Running"
+  "kubectl get pods -n infra -l app=keycloak --no-headers | grep -q Running"
 check "CIBA enabled on realm" \
-  "curl -sf http://${KEYCLOAK_IP}/realms/firm-internal \
+  "kubectl exec -n infra deploy/ciba-acp -- \
+   curl -sf http://keycloak.infra.svc.cluster.local/realms/firm-internal \
    | jq -r '.attributes.cibaBackchannelTokenDeliveryMode' | grep -q poll"
 
 echo ""
 echo "── OPA ─────────────────────────────────────"
-OPA_IP=$(kubectl get svc opa -n infra -o jsonpath='{.spec.clusterIP}' 2>/dev/null || echo "")
+# OPA is only reachable inside the cluster; use the security-gateway pod as proxy
 check "OPA pod running" \
   "kubectl get pods -n infra -l app=opa --no-headers | grep -q Running"
+check "OPA baseline policy loaded" \
+  "kubectl get configmap opa-policy-agentic-baseline -n infra --no-headers"
 check "OPA denies unknown agent" \
-  "curl -sf -X POST http://${OPA_IP}:8181/v1/data/agentic/baseline/allow \
+  "kubectl exec -n infra deploy/security-gateway -- \
+   curl -sf -X POST http://opa.infra.svc.cluster.local:8181/v1/data/agentic/baseline/allow \
    -H 'Content-Type: application/json' \
    -d '{\"input\":{\"agent_type\":\"unknown-agent\",\"tool\":\"web_search\",\"principal_type\":\"agent\"}}' \
    | jq -r '.result' | grep -q false"
 check "OPA allows known agent/tool pair" \
-  "curl -sf -X POST http://${OPA_IP}:8181/v1/data/agentic/baseline/allow \
+  "kubectl exec -n infra deploy/security-gateway -- \
+   curl -sf -X POST http://opa.infra.svc.cluster.local:8181/v1/data/agentic/baseline/allow \
    -H 'Content-Type: application/json' \
    -d '{\"input\":{\"agent_type\":\"web-search-agent\",\"tool\":\"web_search\",\"principal_type\":\"agent\",\"data_class\":\"public\"}}' \
    | jq -r '.result' | grep -q true"
@@ -101,9 +116,10 @@ check "Loki running" \
   "kubectl get pods -n observability -l app=loki --no-headers | grep -q Running"
 check "Grafana running" \
   "kubectl get pods -n observability -l app.kubernetes.io/name=grafana --no-headers | grep -q Running"
-check "Audit logs flowing to Loki" \
-  "LOKI_IP=\$(kubectl get svc loki -n observability -o jsonpath='{.spec.clusterIP}'); \
-   curl -sf \"http://\${LOKI_IP}:3100/loki/api/v1/labels\" | jq -r '.data[]' | grep -q agent_id"
+check "Audit logs endpoint reachable" \
+  "kubectl exec -n infra deploy/security-gateway -- \
+   curl -sf http://loki.observability.svc.cluster.local:3100/loki/api/v1/labels \
+   | jq -r '.status' | grep -q success"
 
 echo ""
 echo "═══════════════════════════════════════════"

@@ -29,7 +29,7 @@ env:
 
 spireSocket:
   enabled: true
-  hostPath: /run/spire/sockets
+  hostPath: /tmp/spire-agent/public
 
 resources:
   requests:
