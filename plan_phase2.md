@@ -15,7 +15,7 @@ scripts/
 
 helmfile/
   phase2/
-    helmfile.yaml            ← all Phase 2 releases, ordering, hooks
+    helmfile.yaml.gotmpl            ← all Phase 2 releases, ordering, hooks
     values/
       ollama-judge.yaml
       ollama-policy.yaml
@@ -37,7 +37,7 @@ helmfile/
 ```bash
 ./scripts/phase2/00_prereqs_phase2.sh
 ./scripts/phase2/01_gpu_nodegroup.sh
-helmfile -f helmfile/phase2/helmfile.yaml sync
+helmfile -f helmfile/phase2/helmfile.yaml.gotmpl sync
 ./scripts/validate_phase2.sh
 ```
 
@@ -172,7 +172,7 @@ log "GPU node group ready"
 
 ## Helmfile — Phase 2
 
-### `helmfile/phase2/helmfile.yaml`
+### `helmfile/phase2/helmfile.yaml.gotmpl`
 
 ```yaml
 repositories:

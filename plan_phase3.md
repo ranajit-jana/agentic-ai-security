@@ -17,7 +17,7 @@ scripts/
 
 helmfile/
   phase3/
-    helmfile.yaml            ← all Phase 3 releases, ordering, hooks
+    helmfile.yaml.gotmpl            ← all Phase 3 releases, ordering, hooks
     values/
       kubearmor.yaml
       kubearmor-operator.yaml
@@ -37,7 +37,7 @@ helmfile/
 ./scripts/phase3/01_guardduty.sh
 ./scripts/phase3/02_cicd_workflows.sh
 ./scripts/phase3/03_github_oidc.sh
-helmfile -f helmfile/phase3/helmfile.yaml sync
+helmfile -f helmfile/phase3/helmfile.yaml.gotmpl sync
 ./scripts/validate_phase3.sh
 ```
 
@@ -374,7 +374,7 @@ log "GitHub Actions OIDC configured for repo: $REPO"
 
 ## Helmfile — Phase 3
 
-### `helmfile/phase3/helmfile.yaml`
+### `helmfile/phase3/helmfile.yaml.gotmpl`
 
 ```yaml
 repositories:

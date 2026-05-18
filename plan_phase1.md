@@ -15,7 +15,7 @@ scripts/
 
 helmfile/
   phase1/
-    helmfile.yaml         ← all Phase 1 releases, ordering, hooks
+    helmfile.yaml.gotmpl         ← all Phase 1 releases, ordering, hooks
     values/
       istio-base.yaml
       istiod.yaml
@@ -43,7 +43,7 @@ aws configure                              # MANUAL STEP 1
 ./scripts/01_aws_infra.sh
 ./scripts/02_eks_cluster.sh
 ./scripts/03_kubeconfig.sh
-helmfile -f helmfile/phase1/helmfile.yaml sync
+helmfile -f helmfile/phase1/helmfile.yaml.gotmpl sync
 ./scripts/validate_phase1.sh
 ```
 
@@ -233,7 +233,7 @@ kubectl get nodes
 
 ## Helmfile — Phase 1
 
-### `helmfile/phase1/helmfile.yaml`
+### `helmfile/phase1/helmfile.yaml.gotmpl`
 
 ```yaml
 repositories:
