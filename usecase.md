@@ -319,6 +319,70 @@ Every span carries `intent_id`, `agent_id`, `policy_decision`, and `macaroon_cav
 
 ---
 
+## Composite Risk Score Calculation
+
+The Gateway computes a risk score for every tool call before deciding whether to allow, audit-flag, or escalate via CIBA. The score is a weighted sum of three components, each normalised to `[0.0, 1.0]`, implemented in `services/security-gateway/app/main.py`:
+
+```python
+risk_score = (blast_score * 0.4) + (class_score * 0.4) + (anomaly * 0.2)
+```
+
+### Component 1 — Tool Blast Radius (40%)
+
+Sourced from the tool's `blast_radius` tag in the **Consul tool registry**. Reflects the potential impact if the tool is misused or misdirected:
+
+| Level | Score | Meaning |
+|---|---|---|
+| `low` | 0.2 | Read-only, no side effects, no data egress |
+| `medium` | 0.5 | Reads sensitive internal data; contained within the system |
+| `high` | 0.9 | Writes, deletes, or moves data outside a system boundary |
+
+### Component 2 — Data Sensitivity (40%)
+
+Sourced from the tool's `data_classification` tag in the **Consul tool registry**. Reflects the sensitivity of the data the tool accesses or produces:
+
+| Classification | Score | Example data |
+|---|---|---|
+| `public` | 0.1 | Public web results, open filings |
+| `internal` | 0.4 | Org charts, cached public filings |
+| `confidential` | 0.8 | Portfolio exposure, fund performance |
+| `restricted` | 1.0 | M&A targets, board materials, trading strategies |
+
+### Component 3 — Anomaly Signal (20%)
+
+Produced by the **LLM Judge** (`judge.py`). The judge evaluates whether the tool call is semantically consistent with the agent's declared intent and returns a `(consistent, confidence, reason)` tuple:
+
+```python
+anomaly = 0.0 if consistent else (1.0 - confidence)
+```
+
+| Scenario | Anomaly value |
+|---|---|
+| Tool call is consistent with intent | `0.0` |
+| Inconsistent, LLM confidence = 0.3 | `0.7` |
+| Judge unreachable (fallback confidence = 0.5) | `0.5` |
+
+### HITL Threshold
+
+```python
+hitl_required = risk_score > 0.75   # services/security-gateway/app/config.py
+```
+
+Any score above `0.75` halts the tool call and triggers a CIBA approval request. Below `0.75`, the Gateway either allows the call (low risk) or allows with a mandatory OPA audit flag (`confidential` data class).
+
+### Score Breakdown for This Use Case
+
+| Step | Tool | Blast radius | Data class | Anomaly | Score | Gateway action |
+|---|---|---|---|---|---|---|
+| 3 | `web_search` | low (0.2) | public (0.1) | 0.0 | **0.12** | Allow |
+| 5 | `query_internal_db` | medium (0.5) | confidential (0.8) | 0.0 | **0.52** | Allow + OPA audit flag |
+| 7 | `generate_report` | low (0.2) | internal (0.4) | 0.0 | **0.24** | Allow |
+| 8 | `send_email` | high (0.9) | confidential (0.8) | 0.35 | **0.83** | **Halt → CIBA → resume on approval** |
+
+The `send_email` call (Step 8) scores highest because it combines the maximum blast radius (data exits the system) with a confidential-tagged attachment. Even with no anomaly signal it would score `0.68`; a modest anomaly from the LLM judge (confidence 0.65 on intent alignment due to the external recipient) pushes it above the `0.75` threshold. The `query_internal_db` call (Step 5) stays below the threshold because the data remains internal — egress is what makes a confidential read CIBA-worthy, not the read itself.
+
+---
+
 ## Threat Scenarios and Mitigations
 
 | Threat | Where It Occurs | Mitigation |

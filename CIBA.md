@@ -181,6 +181,8 @@ CIBA removes this entirely. The human never hands anything to the agent. The age
 
 Not every agent action requires CIBA approval. The security gateway computes a composite risk score per tool call (data sensitivity + tool blast radius + anomaly signal). Only actions above a configurable threshold trigger a CIBA request. Low-risk reads proceed without interruption; high-risk writes, external communications, or access to sensitive data classes pause for human sign-off. CIBA is the mechanism that makes this selective gating possible without requiring the human to be present for every call.
 
+For the full formula, component weights, and score breakdown see [Composite Risk Score Calculation](usecase.md#composite-risk-score-calculation) in the use case document.
+
 ---
 
 ## CIBA in the Sarah Use Case
@@ -327,7 +329,7 @@ The `send_email` call is scored high (0.82) precisely because it is the **exfilt
 
 ### Risk Scoring Model — Data Classification Tiers
 
-The Gateway's composite risk score is driven by three factors: **data sensitivity** (what classification is the data?), **tool blast radius** (can this tool exfiltrate, modify, or delete?), and **anomaly signal** (is this agent behaving outside its normal pattern?). Data classification is the dominant factor for read-only operations; blast radius becomes dominant when data crosses a system boundary.
+The Gateway's composite risk score is driven by three factors: **data sensitivity** (what classification is the data?), **tool blast radius** (can this tool exfiltrate, modify, or delete?), and **anomaly signal** (is this agent behaving outside its normal pattern?). Data classification is the dominant factor for read-only operations; blast radius becomes dominant when data crosses a system boundary. The full formula and component weights are documented in [Composite Risk Score Calculation](usecase.md#composite-risk-score-calculation).
 
 | Data classification | Base score contribution | CIBA triggered? | Compensating controls when CIBA not triggered |
 |---|---|---|---|
