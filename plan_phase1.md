@@ -67,18 +67,32 @@ helmfile -f helmfile/phase1/helmfile.yaml.gotmpl sync
 
 ---
 
-> **MANUAL STEP 2 — ACM Certificate (HTTPS for Keycloak + Portal)**
+> **MANUAL STEP 2 — ACM Certificate (HTTPS for ALB)**
 >
-> Required for ALB HTTPS. Cannot be fully automated without Route53.
+> Required before deploying `helmfile/phase1/manifests/alb-ingress.yaml`. The DNS provider is **Route53** (hosted zone: `rj-lab.click`). `01_aws_infra.sh` skips this step — the ARN is hardcoded directly in `alb-ingress.yaml`.
 >
-> 1. AWS Console → **Certificate Manager** → **Request certificate**
-> 2. Add domain names: `auth.firm.internal`, `portal.firm.internal`
-> 3. Choose **DNS validation** → copy the CNAME records shown
-> 4. Add CNAME records to your DNS provider
+> 1. AWS Console → **Certificate Manager** → **Request certificate** → **Public certificate**
+> 2. Add domain names:
+>    ```
+>    auth.rj-lab.click
+>    keycloak.rj-lab.click
+>    gateway.rj-lab.click
+>    grafana.rj-lab.click
+>    ```
+>    (Or request a single wildcard `*.rj-lab.click` to cover all four.)
+> 3. Choose **DNS validation** — AWS will show CNAME records to add
+> 4. In Route53 → **Hosted zones** → `rj-lab.click` → add the CNAME records shown by ACM
+>    (AWS Console offers a one-click "Create records in Route53" button on the validation page)
 > 5. Wait for status **Issued** (5–15 min)
-> 6. Copy the Certificate ARN — `01_aws_infra.sh` prompts for it
->
-> If using Route53: add `--route53` flag to `01_aws_infra.sh` to automate this step.
+> 6. Copy the Certificate ARN and update it in:
+>    ```
+>    helmfile/phase1/manifests/alb-ingress.yaml
+>    ```
+>    Line 9:
+>    ```yaml
+>    alb.ingress.kubernetes.io/certificate-arn: "<paste ARN here>"
+>    ```
+> 7. Commit the change before running `helmfile sync`
 
 ---
 
