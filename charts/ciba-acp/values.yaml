@@ -20,7 +20,7 @@ env:
   KEYCLOAK_REALM: "firm-internal"
   SNS_TOPIC_ARN: ""
   AWS_REGION: "us-east-1"
-  LOG_LEVEL: "INFO"
+  LOG_LEVEL: "WARNING"
 
 resources:
   requests:

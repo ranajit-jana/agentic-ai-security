@@ -16,4 +16,4 @@ EXPOSE 8080
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s \
   CMD curl -f http://localhost:8080/health || exit 1
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--no-access-log", "--log-level", "warning"]

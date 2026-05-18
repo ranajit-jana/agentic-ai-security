@@ -20,7 +20,7 @@ env:
   KEYCLOAK_REALM: "firm-internal"
   SNS_TOPIC_ARN: "arn:aws:sns:ap-south-1:923373850235:ciba-approvals"
   AWS_REGION: "ap-south-1"
-  LOG_LEVEL: "INFO"
+  LOG_LEVEL: "WARNING"
   LOG_FORMAT: "json"
 
 resources:

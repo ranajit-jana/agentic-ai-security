@@ -24,7 +24,7 @@ env:
   JUDGE_CONFIDENCE_THRESHOLD: "0.7"
   TRUST_DOMAIN: "firm.internal"
   LOG_FORMAT: "json"
-  LOG_LEVEL: "INFO"
+  LOG_LEVEL: "WARNING"
   AUDIT_LOKI_URL: "http://loki.observability.svc.cluster.local:3100"
 
 spireSocket:

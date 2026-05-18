@@ -59,7 +59,8 @@ A production-grade security infrastructure for agentic AI systems, deployed on A
 | Gateway | FastAPI orchestrator + Envoy + LiteLLM |
 | Rate limiting | Redis |
 | Tracing | OpenTelemetry → Loki → Grafana |
-| Audit logging | OTel Collector → Loki → Grafana |
+| Audit logging | OTel Collector → Loki → Grafana (WARNING+ only) |
+| Log level | WARNING and above across all services — INFO suppressed at source |
 | Container registry | AWS ECR (immutable tags, scan on push) |
 | IaC | AWS CLI + eksctl (infra) · Helmfile (K8s workloads) |
 
@@ -135,26 +136,34 @@ The following inline policies must be attached to the deploying IAM user in addi
 
 Phase 1 deploys: Istio · Istio Ingress Gateway · SPIRE · Consul · Vault · Keycloak · CIBA ACP · OPA · Redis · Security Gateway · OTel · Loki · Grafana · Agents
 
+**First time only:**
 ```bash
 # Step 0 — configure AWS credentials
 aws configure
-# Enter: Access Key ID, Secret Access Key, region (ap-south-1), output (json)
 aws sts get-caller-identity   # verify
 
-# Step 1 — AWS resources (KMS, ECR, SNS, IAM roles)
+# Step 1 — AWS resources (KMS, ECR, SNS, IAM roles) — run ONCE, persists forever
 bash scripts/01_aws_infra.sh
 
-# Step 2 — EKS cluster + node groups + EBS CSI driver (~15 min)
+# Step 2 — EKS cluster + node groups (~15 min)
 bash scripts/02_eks_cluster.sh
 
 # Step 3 — Point kubectl at the new cluster
 bash scripts/03_kubeconfig.sh
 
-# Step 4 — Deploy all Phase 1 workloads (~20 min)
+# Step 4 — Deploy all workloads + wire DNS (~20 min)
 bash scripts/04_helmfile_deploy.sh
 
-# Step 5 — Validate (should be 23/23)
+# Step 5 — Validate (should be 34/34)
 bash scripts/validate_phase1.sh
+```
+
+**Every subsequent rebuild (skip step 1):**
+```bash
+bash scripts/02_eks_cluster.sh      # cluster + OIDC provider (fresh each time)
+bash scripts/03_kubeconfig.sh
+bash scripts/04_helmfile_deploy.sh  # deploys everything + wires Route 53 → ALB
+bash scripts/validate_phase1.sh     # should be 34/34
 ```
 
 ### Vault Init — Required Human Step
@@ -189,9 +198,21 @@ Public services are exposed over HTTPS via an AWS ALB with the ACM wildcard cert
 | `https://auth.rj-lab.click` | Keycloak (OIDC / CIBA auth) |
 | `https://gateway.rj-lab.click` | Security Gateway API |
 | `https://keycloak.rj-lab.click` | Keycloak admin console |
-| `https://grafana.rj-lab.click` | Grafana dashboards |
+| `https://grafana.rj-lab.click` | Grafana dashboards (WARNING/ERROR logs only) |
 
 Internal-only services (Vault, Consul) remain accessible within the cluster via `.firm.internal` hostnames and are not exposed publicly.
+
+#### Grafana dashboards
+
+Three dashboards are pre-loaded under the **Agentic Security** folder:
+
+| Dashboard | Content |
+|---|---|
+| **Security Gateway** | All decisions · Denied requests · HITL triggers |
+| **Agent Activity** | Per-agent logs — orchestrator, web-search, internal-data, email, report |
+| **Logs / App** | Community Loki explorer — browse any app's logs |
+
+All dashboard queries are filtered to `WARNING` and above. Default credentials: `admin` / see Vault (`secret/grafana/admin`). **Change the password before exposing to the internet.**
 
 ```bash
 # Verify ALB is provisioned
@@ -201,6 +222,48 @@ kubectl get ingress platform-public-alb -n istio-system
 dig +short auth.rj-lab.click
 dig +short grafana.rj-lab.click
 ```
+
+### Nightly Destroy / Morning Rebuild
+
+The EKS cluster (~$330/month if left running) should be destroyed when not in use. Resources that cost under $2/month (KMS, ECR, ACM, Route 53, SNS, IAM) are kept permanently — `01_aws_infra.sh` only needs to run once ever.
+
+**Evening (~2 min):**
+```bash
+bash scripts/destroy.sh
+# Removes: ALB → LBC → LBC IAM → EKS cluster + NAT gateway + VPC
+```
+
+**Morning (~25 min):**
+```bash
+bash scripts/02_eks_cluster.sh      # recreate cluster + register fresh OIDC provider
+bash scripts/03_kubeconfig.sh       # point kubectl at it
+bash scripts/04_helmfile_deploy.sh  # deploy everything + wire DNS automatically
+```
+
+> `01_aws_infra.sh` is **not needed** on subsequent rebuilds — KMS, ECR, SNS, and IAM roles persist.
+>
+> The IAM OIDC provider is recreated automatically by `02_eks_cluster.sh` on every rebuild — each new cluster gets a fresh OIDC issuer ID so this must run each time.
+
+**What costs >$2/month (deleted nightly):**
+
+| Resource | Per month |
+|---|---|
+| EC2 nodes (5 nodes) | ~$210–270 |
+| EKS control plane | ~$72 |
+| NAT Gateway | ~$33 |
+| ALB | ~$16 |
+
+**What stays (free or <$2/month):**
+
+| Resource | Per month |
+|---|---|
+| KMS key | $1.00 |
+| Route 53 hosted zone | $0.50 |
+| ECR images | ~$0.30 |
+| ACM wildcard cert | $0 |
+| SNS topics | $0 |
+
+---
 
 ### Phase 2 — Hardening *(coming next)*
 

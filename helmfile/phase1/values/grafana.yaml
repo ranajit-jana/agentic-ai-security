@@ -31,6 +31,151 @@ dashboardProviders:
         options:
           path: /var/lib/grafana/dashboards/default
 
+dashboards:
+  default:
+    loki-explorer:
+      gnetId: 13639
+      revision: 2
+      datasource: Loki
+
+    security-gateway:
+      json: |
+        {
+          "title": "Security Gateway",
+          "uid": "security-gw",
+          "schemaVersion": 36,
+          "refresh": "30s",
+          "time": {"from": "now-1h", "to": "now"},
+          "panels": [
+            {
+              "id": 1,
+              "type": "logs",
+              "title": "All Decisions",
+              "gridPos": {"h": 10, "w": 24, "x": 0, "y": 0},
+              "datasource": {"type": "loki", "uid": "loki"},
+              "targets": [{
+                "refId": "A",
+                "expr": "{app=\"security-gateway\", namespace=\"infra\"} | json | level=~\"(warning|error|critical|WARNING|ERROR|CRITICAL)\""
+              }],
+              "options": {
+                "dedupStrategy": "none",
+                "enableLogDetails": true,
+                "showTime": true,
+                "sortOrder": "Descending",
+                "wrapLogMessage": false
+              }
+            },
+            {
+              "id": 2,
+              "type": "logs",
+              "title": "Denied Requests",
+              "gridPos": {"h": 10, "w": 24, "x": 0, "y": 10},
+              "datasource": {"type": "loki", "uid": "loki"},
+              "targets": [{
+                "refId": "A",
+                "expr": "{app=\"security-gateway\", namespace=\"infra\"} | json | level=~\"(warning|error|critical|WARNING|ERROR|CRITICAL)\" |= \"deny\""
+              }],
+              "options": {
+                "dedupStrategy": "none",
+                "enableLogDetails": true,
+                "showTime": true,
+                "sortOrder": "Descending",
+                "wrapLogMessage": false
+              }
+            },
+            {
+              "id": 3,
+              "type": "logs",
+              "title": "HITL Triggers",
+              "gridPos": {"h": 8, "w": 24, "x": 0, "y": 20},
+              "datasource": {"type": "loki", "uid": "loki"},
+              "targets": [{
+                "refId": "A",
+                "expr": "{app=\"security-gateway\", namespace=\"infra\"} | json | level=~\"(warning|error|critical|WARNING|ERROR|CRITICAL)\" |= \"hitl\""
+              }],
+              "options": {
+                "dedupStrategy": "none",
+                "enableLogDetails": true,
+                "showTime": true,
+                "sortOrder": "Descending",
+                "wrapLogMessage": false
+              }
+            }
+          ]
+        }
+
+    agent-activity:
+      json: |
+        {
+          "title": "Agent Activity",
+          "uid": "agent-activity",
+          "schemaVersion": 36,
+          "refresh": "30s",
+          "time": {"from": "now-1h", "to": "now"},
+          "panels": [
+            {
+              "id": 1,
+              "type": "logs",
+              "title": "Orchestrator Agent",
+              "gridPos": {"h": 8, "w": 24, "x": 0, "y": 0},
+              "datasource": {"type": "loki", "uid": "loki"},
+              "targets": [{
+                "refId": "A",
+                "expr": "{app=\"orchestrator-agent\", namespace=\"agents\"} | json | level=~\"(warning|error|critical|WARNING|ERROR|CRITICAL)\""
+              }],
+              "options": {"dedupStrategy": "none", "enableLogDetails": true, "showTime": true, "sortOrder": "Descending"}
+            },
+            {
+              "id": 2,
+              "type": "logs",
+              "title": "Web Search Agent",
+              "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+              "datasource": {"type": "loki", "uid": "loki"},
+              "targets": [{
+                "refId": "A",
+                "expr": "{app=\"web-search-agent\", namespace=\"agents\"} | json | level=~\"(warning|error|critical|WARNING|ERROR|CRITICAL)\""
+              }],
+              "options": {"dedupStrategy": "none", "enableLogDetails": true, "showTime": true, "sortOrder": "Descending"}
+            },
+            {
+              "id": 3,
+              "type": "logs",
+              "title": "Internal Data Agent",
+              "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+              "datasource": {"type": "loki", "uid": "loki"},
+              "targets": [{
+                "refId": "A",
+                "expr": "{app=\"internal-data-agent\", namespace=\"agents\"} | json | level=~\"(warning|error|critical|WARNING|ERROR|CRITICAL)\""
+              }],
+              "options": {"dedupStrategy": "none", "enableLogDetails": true, "showTime": true, "sortOrder": "Descending"}
+            },
+            {
+              "id": 4,
+              "type": "logs",
+              "title": "Email Agent",
+              "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+              "datasource": {"type": "loki", "uid": "loki"},
+              "targets": [{
+                "refId": "A",
+                "expr": "{app=\"email-agent\", namespace=\"agents\"} | json | level=~\"(warning|error|critical|WARNING|ERROR|CRITICAL)\""
+              }],
+              "options": {"dedupStrategy": "none", "enableLogDetails": true, "showTime": true, "sortOrder": "Descending"}
+            },
+            {
+              "id": 5,
+              "type": "logs",
+              "title": "Report Generation Agent",
+              "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+              "datasource": {"type": "loki", "uid": "loki"},
+              "targets": [{
+                "refId": "A",
+                "expr": "{app=\"report-generation-agent\", namespace=\"agents\"} | json | level=~\"(warning|error|critical|WARNING|ERROR|CRITICAL)\""
+              }],
+              "options": {"dedupStrategy": "none", "enableLogDetails": true, "showTime": true, "sortOrder": "Descending"}
+            }
+          ]
+        }
+
 service:
   type: ClusterIP
   port: 80

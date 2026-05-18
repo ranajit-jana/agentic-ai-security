@@ -78,8 +78,25 @@ else
   log "EKS cluster $CLUSTER_NAME not found — nothing to delete"
 fi
 
+# ── Step 5: Delete IAM OIDC provider ─────────────────────────────────────────
+OIDC_ARN=$(aws iam list-open-id-connect-providers \
+  --query "OpenIDConnectProviderList[?ends_with(Arn, '${CLUSTER_NAME}') || contains(Arn, 'oidc.eks.${REGION}')].Arn" \
+  --output text 2>/dev/null || true)
+if [ -n "$OIDC_ARN" ]; then
+  log "Deleting IAM OIDC provider..."
+  aws iam delete-open-id-connect-provider --open-id-connect-provider-arn "$OIDC_ARN"
+  log "OIDC provider deleted"
+else
+  log "OIDC provider not found — skipping"
+fi
+
 echo ""
 echo "══════════════════════════════════════════════════════════════"
-echo " Done — ALB, cluster, and nodes deleted. No more EC2/NAT/ALB charges."
-echo " To rebuild: bash scripts/01_aws_infra.sh && bash scripts/02_eks_cluster.sh && bash scripts/03_kubeconfig.sh && bash scripts/04_helmfile_deploy.sh"
+echo " Done — ALB, cluster, nodes, and OIDC provider deleted."
+echo " No more EC2/NAT/ALB charges."
+echo ""
+echo " To rebuild (skip step 1 — infra persists):"
+echo "   bash scripts/02_eks_cluster.sh"
+echo "   bash scripts/03_kubeconfig.sh"
+echo "   bash scripts/04_helmfile_deploy.sh"
 echo "══════════════════════════════════════════════════════════════"

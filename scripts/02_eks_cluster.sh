@@ -168,4 +168,15 @@ bind_pod_identity() {
 bind_pod_identity infra vault    vault-unseal-role
 bind_pod_identity infra ciba-acp ciba-acp-role
 
+# ── IAM OIDC provider ─────────────────────────────────────────────────────────
+# Required for AWS Load Balancer Controller to assume its IAM role via IRSA.
+# Each new cluster gets a fresh OIDC issuer ID so this must run on every rebuild.
+
+log "Associating IAM OIDC provider for cluster..."
+eksctl utils associate-iam-oidc-provider \
+  --cluster "$CLUSTER_NAME" \
+  --region "$REGION" \
+  --approve
+log "OIDC provider registered"
+
 log "EKS cluster ready"
