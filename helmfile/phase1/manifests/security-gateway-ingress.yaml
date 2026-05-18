@@ -1,0 +1,109 @@
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: platform-ingress
+  namespace: istio-system
+spec:
+  selector:
+    istio: gateway
+  servers:
+    - port:
+        number: 80
+        name: http
+        protocol: HTTP
+      hosts:
+        - "gateway.firm.internal"
+        - "keycloak.firm.internal"
+        - "vault.firm.internal"
+        - "grafana.firm.internal"
+        - "consul.firm.internal"
+---
+# Security Gateway
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: security-gateway
+  namespace: infra
+spec:
+  hosts:
+    - "gateway.firm.internal"
+  gateways:
+    - istio-system/platform-ingress
+  http:
+    - route:
+        - destination:
+            host: security-gateway.infra.svc.cluster.local
+            port:
+              number: 8080
+---
+# Keycloak
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: keycloak
+  namespace: infra
+spec:
+  hosts:
+    - "keycloak.firm.internal"
+  gateways:
+    - istio-system/platform-ingress
+  http:
+    - route:
+        - destination:
+            host: keycloak.infra.svc.cluster.local
+            port:
+              number: 80
+---
+# Vault UI
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: vault-ui
+  namespace: infra
+spec:
+  hosts:
+    - "vault.firm.internal"
+  gateways:
+    - istio-system/platform-ingress
+  http:
+    - route:
+        - destination:
+            host: vault-ui.infra.svc.cluster.local
+            port:
+              number: 8200
+---
+# Grafana
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: grafana
+  namespace: observability
+spec:
+  hosts:
+    - "grafana.firm.internal"
+  gateways:
+    - istio-system/platform-ingress
+  http:
+    - route:
+        - destination:
+            host: grafana.observability.svc.cluster.local
+            port:
+              number: 80
+---
+# Consul UI
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: consul-ui
+  namespace: infra
+spec:
+  hosts:
+    - "consul.firm.internal"
+  gateways:
+    - istio-system/platform-ingress
+  http:
+    - route:
+        - destination:
+            host: consul-ui.infra.svc.cluster.local
+            port:
+              number: 80

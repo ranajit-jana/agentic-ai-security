@@ -1,6 +1,5 @@
 package agentic.baseline
 
-import future.keywords.if
 import future.keywords.in
 
 default allow = false
@@ -43,7 +42,7 @@ human_allowed_tools := {
 # ── Allow rules ───────────────────────────────────────────────────────────────
 
 # Agent: tool must be in agent's allowed list and data class must not exceed ceiling
-allow if {
+allow {
   input.principal_type == "agent"
   tools := agent_allowed_tools[input.agent_type]
   input.tool in tools
@@ -53,7 +52,7 @@ allow if {
 }
 
 # Human user: role must permit the tool
-allow if {
+allow {
   input.principal_type == "human"
   some role in input.user_roles
   tools := human_allowed_tools[role]
@@ -64,25 +63,25 @@ allow if {
 # ── Absolute deny rules (override any allow) ──────────────────────────────────
 
 # No principal — human or agent — may delete production records
-absolute_deny if {
+absolute_deny {
   input.tool == "delete_record"
 }
 
 # Agents may not send email to external domains
-absolute_deny if {
+absolute_deny {
   input.principal_type == "agent"
   input.tool == "send_email"
   input.target_domain != "firm.internal"
 }
 
 # Unknown agent type is never allowed
-absolute_deny if {
+absolute_deny {
   input.principal_type == "agent"
   not agent_allowed_tools[input.agent_type]
 }
 
 # Restricted data is never accessible to agents
-absolute_deny if {
+absolute_deny {
   input.principal_type == "agent"
   input.data_class == "restricted"
 }

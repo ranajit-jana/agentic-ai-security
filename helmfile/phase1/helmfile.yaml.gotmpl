@@ -62,6 +62,23 @@ releases:
         command: "bash"
         args: ["{{ env "REPO_ROOT" }}/helmfile/phase1/hooks/spire-register-entries.sh"]
 
+  # ── Istio Ingress Gateway ────────────────────────────────────────────────
+
+  - name: istio-gateway
+    namespace: istio-system
+    chart: istio/gateway
+    needs:
+      - istio-system/istiod
+    values:
+      - values/istio-gateway.yaml
+    hooks:
+      - events: ["postsync"]
+        command: "kubectl"
+        args:
+          - apply
+          - -f
+          - {{ env "REPO_ROOT" }}/helmfile/phase1/manifests/security-gateway-ingress.yaml
+
   # ── Consul ────────────────────────────────────────────────────────────────
 
   - name: consul

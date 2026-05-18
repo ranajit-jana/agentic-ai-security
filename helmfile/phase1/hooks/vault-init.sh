@@ -26,18 +26,53 @@ else
   if echo "$INIT_OUT" | grep -q "already initialized"; then
     echo "Vault already initialized — continuing"
   else
+    # Write keys to a file immediately — never rely on terminal scroll
+    KEYS_FILE="${HOME}/vault-init-keys-$(date +%Y%m%d-%H%M%S).txt"
+    echo "$INIT_OUT" > "$KEYS_FILE"
+    chmod 600 "$KEYS_FILE"
+
     echo "$INIT_OUT"
     echo ""
     echo "=========================================================="
-    echo "  SAVE THE RECOVERY KEYS ABOVE IN A PASSWORD MANAGER NOW"
+    echo "  KEYS WRITTEN TO: ${KEYS_FILE}"
+    echo "  Move this file to a password manager then DELETE it."
     echo "  KMS handles day-to-day unseal — recovery keys are for"
     echo "  disaster recovery only (KMS key loss/deletion)."
     echo "=========================================================="
+    echo ""
+
+    # Also persist in a K8s Secret as a second safety net
+    kubectl create secret generic vault-init-keys \
+      --from-literal=init-output="$INIT_OUT" \
+      -n infra --dry-run=client -o yaml | kubectl apply -f - 2>/dev/null || true
+    echo "Keys also stored in K8s Secret 'vault-init-keys' (infra namespace)."
+    echo "  kubectl get secret vault-init-keys -n infra -o jsonpath='{.data.init-output}' | base64 -d"
+    echo "  kubectl delete secret vault-init-keys -n infra   # run this after saving"
+    echo ""
+
+    # Block until operator confirms keys are saved
+    if [ -t 0 ]; then
+      read -r -p ">>> Press Enter ONLY after you have saved ALL 5 recovery keys and the root token: "
+    else
+      echo "WARNING: Non-interactive shell — retrieve keys from ${KEYS_FILE} before continuing."
+      echo "Sleeping 60s to allow log capture..."
+      sleep 60
+    fi
   fi
 fi
 
 echo "Waiting for vault-0 to become Ready (KMS auto-unseal in progress)..."
 kubectl wait pod vault-0 -n infra --for=condition=Ready --timeout=300s
+
+# Join followers to the Raft cluster (retry_join in config handles this passively,
+# but explicit join here ensures it completes before we proceed)
+for peer in vault-1 vault-2; do
+  echo "Joining ${peer} to Raft cluster..."
+  kubectl exec -n infra "${peer}" -- vault operator raft join http://vault-0.vault-internal:8200 2>/dev/null || true
+done
+
+echo "Waiting for vault-1 and vault-2 to become Ready (KMS unseal in progress)..."
+kubectl wait pod vault-1 vault-2 -n infra --for=condition=Ready --timeout=180s
 
 # Enable Kubernetes auth backend
 kubectl exec -n infra vault-0 -- vault auth enable kubernetes 2>/dev/null || true

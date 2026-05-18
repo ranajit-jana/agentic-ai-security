@@ -7,6 +7,9 @@ nodeSelector:
 opa:
   enabled: true
 
+authz:
+  enabled: false
+
 # Policy loaded via opa-load-policies.sh hook after deploy
 # OPAL sidecar watches Consul KV for policy updates
 

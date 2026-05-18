@@ -54,9 +54,9 @@ spec:
         {{- toYaml $.Values.nodeSelector | nindent 8 }}
       volumes:
         - name: spire-agent-socket
-          hostPath:
-            path: {{ $.Values.spireSocket.hostPath }}
-            type: DirectoryOrCreate
+          csi:
+            driver: "csi.spiffe.io"
+            readOnly: true
       containers:
         - name: {{ $agent.name }}
           image: "{{ $.Values.ecrRegistry }}/{{ $agent.image }}:{{ $.Values.imageTag }}"

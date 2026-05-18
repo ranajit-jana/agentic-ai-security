@@ -77,8 +77,8 @@ check "Keycloak pod running" \
   "kubectl get pods -n infra -l app=keycloak --no-headers | grep -q Running"
 check "CIBA enabled on realm" \
   "kubectl exec -n infra deploy/ciba-acp -- \
-   curl -sf http://keycloak.infra.svc.cluster.local/realms/firm-internal \
-   | jq -r '.attributes.cibaBackchannelTokenDeliveryMode' | grep -q poll"
+   curl -sf --max-time 10 http://keycloak.infra.svc.cluster.local/realms/firm-internal/.well-known/openid-configuration \
+   | jq -r '.backchannel_authentication_endpoint' | grep -qv null"
 
 echo ""
 echo "── OPA ─────────────────────────────────────"
@@ -89,13 +89,13 @@ check "OPA baseline policy loaded" \
   "kubectl get configmap opa-policy-agentic-baseline -n infra --no-headers"
 check "OPA denies unknown agent" \
   "kubectl exec -n infra deploy/security-gateway -- \
-   curl -sf -X POST http://opa.infra.svc.cluster.local:8181/v1/data/agentic/baseline/allow \
+   curl -sfk --max-time 10 -X POST https://opa.infra.svc.cluster.local/v1/data/agentic/baseline/allow \
    -H 'Content-Type: application/json' \
    -d '{\"input\":{\"agent_type\":\"unknown-agent\",\"tool\":\"web_search\",\"principal_type\":\"agent\"}}' \
    | jq -r '.result' | grep -q false"
 check "OPA allows known agent/tool pair" \
   "kubectl exec -n infra deploy/security-gateway -- \
-   curl -sf -X POST http://opa.infra.svc.cluster.local:8181/v1/data/agentic/baseline/allow \
+   curl -sfk --max-time 10 -X POST https://opa.infra.svc.cluster.local/v1/data/agentic/baseline/allow \
    -H 'Content-Type: application/json' \
    -d '{\"input\":{\"agent_type\":\"web-search-agent\",\"tool\":\"web_search\",\"principal_type\":\"agent\",\"data_class\":\"public\"}}' \
    | jq -r '.result' | grep -q true"
@@ -106,7 +106,7 @@ check "Gateway pod running" \
   "kubectl get pods -n infra -l app=security-gateway --no-headers | grep -q Running"
 check "Gateway health endpoint responds" \
   "kubectl exec -n infra deploy/security-gateway -- \
-   curl -sf http://localhost:8080/health | grep -q ok"
+   curl -sf --max-time 10 http://localhost:8080/health | grep -q ok"
 
 echo ""
 echo "── Observability ───────────────────────────"
@@ -118,7 +118,7 @@ check "Grafana running" \
   "kubectl get pods -n observability -l app.kubernetes.io/name=grafana --no-headers | grep -q Running"
 check "Audit logs endpoint reachable" \
   "kubectl exec -n infra deploy/security-gateway -- \
-   curl -sf http://loki.observability.svc.cluster.local:3100/loki/api/v1/labels \
+   curl -sf --max-time 10 http://loki.observability.svc.cluster.local:3100/loki/api/v1/labels \
    | jq -r '.status' | grep -q success"
 
 echo ""

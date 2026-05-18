@@ -7,31 +7,28 @@ kubectl wait pod -n infra -l app=keycloak --for=condition=Ready --timeout=300s
 ADMIN_PASS=$(kubectl get secret keycloak-admin -n infra \
   -o jsonpath='{.data.password}' | base64 -d)
 
-# Port-forward so curl can reach the ClusterIP service
-kubectl port-forward svc/keycloak -n infra 18080:80 &>/dev/null &
-PF_PID=$!
-trap "kill $PF_PID 2>/dev/null || true" EXIT
-sleep 5
+KEYCLOAK_URL="http://keycloak.infra.svc.cluster.local"
 
-KEYCLOAK_URL="http://localhost:18080"
-
-# Get admin token
-TOKEN=$(curl -sf -X POST \
-  "$KEYCLOAK_URL/realms/master/protocol/openid-connect/token" \
+# Get admin token from inside the cluster via ciba-acp pod
+TOKEN=$(kubectl exec -n infra deploy/ciba-acp -- \
+  curl -sf --max-time 10 -X POST \
+  "${KEYCLOAK_URL}/realms/master/protocol/openid-connect/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "client_id=admin-cli&username=admin&password=${ADMIN_PASS}&grant_type=password" \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
 
-auth_header="Authorization: Bearer $TOKEN"
-
 # Create firm-internal realm
-curl -sf -X POST "$KEYCLOAK_URL/admin/realms" \
-  -H "$auth_header" -H "Content-Type: application/json" \
+kubectl exec -n infra deploy/ciba-acp -- \
+  curl -sf --max-time 10 -X POST "${KEYCLOAK_URL}/admin/realms" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -H "Content-Type: application/json" \
   -d '{"realm":"firm-internal","enabled":true,"displayName":"Firm Internal"}' 2>/dev/null || true
 
 # Enable CIBA on the realm
-curl -sf -X PUT "$KEYCLOAK_URL/admin/realms/firm-internal" \
-  -H "$auth_header" -H "Content-Type: application/json" \
+kubectl exec -n infra deploy/ciba-acp -- \
+  curl -sf --max-time 10 -X PUT "${KEYCLOAK_URL}/admin/realms/firm-internal" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -H "Content-Type: application/json" \
   -d '{
     "attributes": {
       "cibaBackchannelTokenDeliveryMode": "poll",
@@ -43,14 +40,20 @@ curl -sf -X PUT "$KEYCLOAK_URL/admin/realms/firm-internal" \
 
 # Create realm roles
 for role in analyst admin viewer; do
-  curl -sf -X POST "$KEYCLOAK_URL/admin/realms/firm-internal/roles" \
-    -H "$auth_header" -H "Content-Type: application/json" \
+  kubectl exec -n infra deploy/ciba-acp -- \
+    curl -sf --max-time 10 -X POST \
+    "${KEYCLOAK_URL}/admin/realms/firm-internal/roles" \
+    -H "Authorization: Bearer ${TOKEN}" \
+    -H "Content-Type: application/json" \
     -d "{\"name\":\"$role\"}" 2>/dev/null || true
 done
 
 # Register CIBA ACP client
-curl -sf -X POST "$KEYCLOAK_URL/admin/realms/firm-internal/clients" \
-  -H "$auth_header" -H "Content-Type: application/json" \
+kubectl exec -n infra deploy/ciba-acp -- \
+  curl -sf --max-time 10 -X POST \
+  "${KEYCLOAK_URL}/admin/realms/firm-internal/clients" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -H "Content-Type: application/json" \
   -d '{
     "clientId": "ciba-acp",
     "enabled": true,
