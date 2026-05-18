@@ -319,6 +319,92 @@ Every span carries `intent_id`, `agent_id`, `policy_decision`, and `macaroon_cav
 
 ---
 
+## Long-Running HITL — CIBA Ping Mode
+
+The Step 8 flow above assumes Sarah approves within a few minutes — she is at her desk, sees the Duo push, and taps Approve. This is the interactive case and uses CIBA Poll mode with a short `expires_in`.
+
+For workflows where approval may take hours or days — a restricted-data query requiring a compliance officer's sign-off, a board-level document release, or an M&A-sensitive action — the same CIBA mechanism works without any design change to the protocol. Two configuration changes and one architectural change make it durable.
+
+### The Problem with Poll Mode for Long Waits
+
+In Poll mode the agent loops:
+```
+every 5 seconds → POST /token (auth_req_id) → wait for response
+```
+Over 48 hours that is ~34,560 polls. More critically, the polling loop lives inside an HTTP request handler. ALB and Istio both enforce connection timeouts (typically 60 seconds). The agent pod cannot hold a connection open for hours — the infrastructure kills it long before the approval arrives.
+
+### Solution: Ping Mode + Extended TTL + Durable Job Store
+
+Three changes, each solving a separate concern:
+
+```
+Keycloak cibaExpiresIn = 172800     ← how long the auth_req_id stays valid (48h)
+Client delivery mode   = ping       ← Keycloak calls you when Sarah approves, no polling
+Job store (Postgres)               ← workflow state survives pod restarts
+```
+
+### How the Flow Changes
+
+```
+T=0h   Workflow hits HITL (risk score > 0.75)
+         │
+         ├─ Orchestrator initiates CIBA (expires_in=172800, mode=ping)
+         ├─ Keycloak sends ONE Duo push / SMS to Sarah via ACP
+         ├─ Workflow state checkpointed to Postgres (LangGraph PostgresSaver)
+         └─ Worker exits — pod is free, zero polling, zero overhead
+
+T=36h  Sarah sees the Duo push, reads the binding message, taps Approve
+         │
+         ├─ Keycloak immediately calls the registered Ping callback:
+         │    POST https://agents.firm.internal/task/{job_id}/ciba-callback
+         │    body: { auth_req_id: "ciba-req-9d4e1a2b" }
+         ├─ Callback fetches token from Keycloak (/token endpoint, one call)
+         ├─ Validates JWT: sig ✓  exp ✓  scope=approve:send_email ✓
+         ├─ Enqueues job_id to Redis jobs:resume queue
+         └─ Returns 200 to Keycloak
+
+T=36h  Worker dequeues job_id from jobs:resume
+         ├─ Loads LangGraph checkpoint from Postgres
+         ├─ Resumes graph from the HITL interrupt node
+         └─ send_email executes → workflow completes
+```
+
+Sarah receives **one** notification and taps **one** Approve. It is the same CIBA flow — the only differences are a longer TTL and a callback instead of a polling loop.
+
+### What Survives Pod Restarts
+
+| State | Where stored | Survives pod kill? |
+|---|---|---|
+| Workflow graph state (messages, results, tool history) | Postgres checkpoint (EBS-backed PVC) | Yes |
+| Pending approval record (auth_req_id, job_id, expires_at) | Postgres pending_approvals table | Yes |
+| Resume signal | Redis AOF queue (`jobs:resume`) | Yes — AOF persistence |
+| In-flight HTTP request | Memory | No — but not needed; Keycloak holds the auth_req_id |
+
+If the worker pod is killed while waiting for approval, nothing is lost. When the Ping callback arrives (from Keycloak, not from the agent), the callback endpoint enqueues the job_id. Any available worker picks it up and loads the checkpoint.
+
+### Poll vs Ping — When to Use Each
+
+| | Poll mode | Ping mode |
+|---|---|---|
+| Approval expected in | Seconds to minutes | Minutes to days |
+| Agent while waiting | Polls every 5s — must stay alive | Exits after checkpoint — free |
+| Keycloak TTL (`cibaExpiresIn`) | 300s (default) | Up to 172800s (48h) |
+| Infrastructure requirement | None | Callback URL reachable by Keycloak |
+| Used in this project | Interactive approvals (Step 8 baseline) | Long-running approvals (compliance, board, M&A) |
+
+### What Changes in the Codebase
+
+| Component | Change |
+|---|---|
+| Keycloak realm | `cibaExpiresIn` set per flow type — short for interactive, long for compliance |
+| Keycloak client (`orchestrator-agent`) | Register `cibaClientNotificationEndpoint` for Ping mode |
+| `main.py` (agent HTTP layer) | Add `GET /task/{id}` status endpoint and `POST /task/{id}/ciba-callback` Ping endpoint |
+| `orchestrator.py` | Replace `for _ in range(5)` loop with LangGraph `StateGraph` + `PostgresSaver` checkpointer; add `interrupt_before` on HITL nodes |
+| New: `worker.py` | Separate deployment — dequeues from Redis, runs graph, checkpoints, exits on interrupt |
+| New: Postgres instance | Dedicated to agent workflows — tables: `jobs`, `job_checkpoints`, `pending_approvals` |
+
+---
+
 ## Composite Risk Score Calculation
 
 The Gateway computes a risk score for every tool call before deciding whether to allow, audit-flag, or escalate via CIBA. The score is a weighted sum of three components, each normalised to `[0.0, 1.0]`, implemented in `services/security-gateway/app/main.py`:

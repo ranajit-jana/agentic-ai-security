@@ -76,8 +76,8 @@ CIBA defines three delivery modes. This project implements:
 
 | Mode | How it works | Used when |
 |---|---|---|
-| **Poll** (implemented) | Client polls the token endpoint repeatedly at `interval` seconds until a token or error is returned | Default; simple, no webhook infra needed |
-| **Ping** (planned for production) | Keycloak calls a client-registered callback URL when the user responds; client fetches the token once | Lower latency; avoids polling overhead at scale |
+| **Poll** (interactive flows) | Client polls the token endpoint repeatedly at `interval` seconds until a token or error is returned | Approval expected in seconds to minutes; simple, no callback infra needed |
+| **Ping** (long-running flows) | Keycloak calls a client-registered callback URL when the user responds; client fetches the token once | Approval may take hours or days; agent must not block waiting |
 | **Push** | Keycloak pushes the token directly to the client callback | Not used — creates complexity managing token delivery at the client |
 
 ---
@@ -206,17 +206,17 @@ CIBA is not involved in Steps 1–7. Those steps are handled by OIDC (Sarah's lo
 ### CIBA Call Flow — Step 8 in Full
 
 ```
-Email Agent    Gateway     Orchestrator     Keycloak          ACP         Sarah's Phone
-     │              │             │              │               │               │
-     │ send_email() │             │              │               │               │
-     ├────────────► │             │              │               │               │
-     │              │             │              │               │               │
-     │         Risk score = 0.82  │              │               │               │
-     │         threshold = 0.75   │              │               │               │
-     │         → CIBA required    │              │               │               │
-     │              ├────────────►│              │               │               │
-     │              │  initiate   │              │               │               │
-     │     [HALTED] │  CIBA flow  │              │               │               │
+Email Agent    Gateway     Orchestrator      Keycloak          ACP         Sarah's Phone
+     │              │             │               │               │               │
+     │ send_email() │             │               │               │               │
+     ├────────────► │             │               │               │               │
+     │              │             │               │               │               │
+     │         Risk score = 0.82  │               │               │               │
+     │         threshold = 0.75   │               │               │               │
+     │         → CIBA required    │               │               │               │
+     │              ├────────────►│               │               │               │
+     │              │  initiate   │               │               │               │
+     │     [HALTED] │  CIBA flow  │               │               │               │
      │              │             │ POST /ciba/auth               │               │
      │              │             │ login_hint=sarah@firm.com     │               │
      │              │             │ scope=approve:send_email      │               │
@@ -225,45 +225,45 @@ Email Agent    Gateway     Orchestrator     Keycloak          ACP         Sarah'
      │              │             │  Acme Q1 2026 (CONFIDENTIAL)  │               │
      │              │             │  to investment-team@firm.com" │               │
      │              │             ├─────────────────────────────► │               │
-     │              │             │              │               │               │
-     │              │             │ ◄── auth_req_id: ciba-req-9d4e1a2b ─────────┤
-     │              │             │     expires_in: 300s         │               │
-     │              │             │     interval: 5s             │               │
-     │              │             │              │               │               │
-     │              │             │              │ POST /notify  │               │
-     │              │             │              │ (auth_req_id, │               │
-     │              │             │              │  binding_msg) │               │
-     │              │             │              ├──────────────►│               │
-     │              │             │              │               │  SMS (SNS)    │
-     │              │             │              │               ├──────────────►│
-     │              │             │              │               │  OR Duo Push  │
-     │              │             │              │               ├──────────────►│
-     │              │             │              │               │               │
-     │              │             │  [polling every 5s ...]      │   Sarah reads │
-     │              │             │  POST /token                 │   binding msg │
-     │              │             │  (auth_req_id)               │   taps Approve│
-     │              │             ├─────────────────────────────►│ ◄────────────┤
-     │              │             │              │               │  (Face ID ✓) │
-     │              │             │              │               │               │
-     │              │             │ ◄── JWT access_token ───────┤               │
-     │              │             │     sub: sarah@firm.com      │               │
-     │              │             │     scope: approve:send_email│               │
-     │              │             │     auth_req_id: ciba-req-.. │               │
-     │              │             │              │               │               │
-     │              │  token      │              │               │               │
-     │              │ ◄──────────┤              │               │               │
-     │              │             │              │               │               │
-     │              │  validate:  │              │               │               │
-     │              │  sig ✓      │              │               │               │
-     │              │  exp ✓      │              │               │               │
-     │              │  scope ✓    │              │               │               │
-     │              │  OPA ✓      │              │               │               │
-     │              │             │              │               │               │
-     │  ✓ resume    │             │              │               │               │
-     │ ◄────────── │             │              │               │               │
-     │              │             │              │               │               │
-     │  send_email  │             │              │               │               │
-     │  executed    │             │              │               │               │
+     │              │             │               │               │               │
+     │              │             │ ◄── auth_req_id: ciba-req-9d4e1a2b   ─────────┤
+     │              │             │     expires_in: 300s          │               │
+     │              │             │     interval: 5s              │               │
+     │              │             │               │               │               │
+     │              │             │               │ POST /notify  │               │
+     │              │             │               │ (auth_req_id, │               │
+     │              │             │               │  binding_msg) │               │
+     │              │             │               ├──────────────►│               │
+     │              │             │               │               │  SMS (SNS)    │
+     │              │             │               │               ├──────────────►│
+     │              │             │               │               │  OR Duo Push  │
+     │              │             │               │               ├──────────────►│
+     │              │             │               │               │               │
+     │              │             │  [polling every 5s ...]       │   Sarah reads │
+     │              │             │  POST /token                  │   binding msg │
+     │              │             │  (auth_req_id)                │   taps Approve│
+     │              │             ├─────────────────────────────► │  ◄────────────┤
+     │              │             │               │               │   (Face ID ✓) │
+     │              │             │               │               │               │
+     │              │             │   ◄── JWT access_token ───────┤               │
+     │              │             │      sub: sarah@firm.com      │               │
+     │              │             │      scope: approve:send_email│               │
+     │              │             │      auth_req_id: ciba-req-.. │               │
+     │              │             │               │               │               │
+     │              │  token      │               │               │               │
+     │              │ ◄ ──────────┤               │               │               │
+     │              │             │               │               │               │
+     │              │  validate:  │               │               │               │
+     │              │  sig ✓      │               │               │               │
+     │              │  exp ✓      │               │               │               │
+     │              │  scope ✓    │               │               │               │
+     │              │  OPA ✓      │               │               │               │
+     │              │             │               │               │               │
+     │  ✓ resume    │             │               │               │               │
+     │ ◄──────────  │             │               │               │               │
+     │              │             │               │               │               │
+     │  send_email  │             │               │               │               │
+     │  executed    │             │               │               │               │
 ```
 
 ### What the Binding Message Looks Like on Sarah's Phone
@@ -339,6 +339,120 @@ The Gateway's composite risk score is driven by three factors: **data sensitivit
 | `restricted` | 0.80+ | **Yes** | CIBA approval required even for read-only queries |
 
 **Design principle:** CIBA is reserved for moments where human approval is *the only meaningful control* — when data leaves the system, when `restricted`-class data is touched at all, or when the action is irreversible. For `confidential` reads that stay internal, the combination of Macaroon scoping, OPA audit flagging, and full distributed tracing provides sufficient oversight without requiring the human to approve every query. Triggering CIBA for every confidential read would cause approval fatigue, training analysts to approve without reading — which is worse than not having CIBA at all.
+
+---
+
+## Long-Running Workflows — CIBA Ping Mode and Extended TTL
+
+The Sarah use case completes in under two minutes — she is at her desk, receives the Duo push, and approves immediately. This is the interactive case. In production financial systems, many approvals take hours or days: a compliance officer reviewing a restricted-data query, a manager approving a board document release, a risk committee sign-off on a large trade. CIBA handles these naturally with two configuration changes and one architectural change.
+
+### Why Poll Mode Fails for Long Waits
+
+Poll mode requires the agent to hold an active loop:
+```
+every 5 seconds → POST /token (auth_req_id) → pending_authorization → repeat
+```
+Over a 48-hour window this generates ~34,560 polling requests. More importantly, the polling loop must live inside a running process. In a Kubernetes deployment, the agent pods sit behind ALB and Istio — both enforce connection timeouts (typically 60 seconds). No HTTP handler can stay open for hours. Poll mode is architecturally incompatible with multi-hour approval windows.
+
+### The Natural Design: Ping Mode + Extended TTL
+
+**Keycloak configuration changes (realm level):**
+
+```
+cibaExpiresIn                   = 172800   # 48h — how long auth_req_id stays valid
+```
+
+**Keycloak client configuration (orchestrator-agent):**
+
+```
+cibaDeliveryMode                = ping
+cibaClientNotificationEndpoint  = https://agents.firm.internal/task/{job_id}/ciba-callback
+```
+
+In Ping mode, Keycloak calls your endpoint the moment Sarah approves. The agent does not poll at all — it checkpoints workflow state and exits. The pod is free.
+
+### Flow — 48-Hour Approval Window
+
+```
+Agent              Keycloak               ACP             Sarah's Phone       Callback Endpoint
+  │                    │                   │                    │                     │
+  │ POST /ciba/auth    │                   │                    │                     │
+  │ expires_in=172800  │                   │                    │                     │
+  │ mode=ping          │                   │                    │                     │
+  ├──────────────────► │                   │                    │                     │
+  │ ◄── auth_req_id ── │                   │                    │                     │
+  │                    │ POST /notify      │                    │                     │
+  │                    ├─────────────────► │                    │                     │
+  │                    │                   │ Duo push / SMS     │                     │
+  │                    │                   ├──────────────────► │                     │
+  │                    │                   │                    │                     │
+  │ checkpoint state   │                   │                    │                     │
+  │ exit cleanly       │                   │ ── (up to 48h) ─── │                     │
+  │                    │                   │                    │                     │
+  │                    │                   │   Sarah taps       │                     │
+  │                    │                   │   Approve          │                     │
+  │                    │ ◄── approval ──── │ ◄───────────────── │                     │
+  │                    │                   │                    │                     │
+  │                    │ POST /ciba-callback (Ping)             │                     │
+  │                    │ body: {auth_req_id}                    │                     │
+  │                    ├──────────────────────────────────────────────────────────── ►│
+  │                    │                   │                    │  fetch token from   │
+  │                    │ ◄── GET /token ───────────────────────────────────────────── │
+  │                    │ ── access_token ─────────────────────────────────────────── ►│
+  │                    │                   │                    │  validate JWT       │
+  │                    │                   │                    │  enqueue job:resume │
+  │                    │                   │                    │  return 200         │
+  │                    │                   │                    │                     │
+  [worker dequeues job, loads checkpoint, resumes workflow → send_email executes]
+```
+
+### The Ping Callback Endpoint
+
+```python
+@app.post("/task/{job_id}/ciba-callback")
+async def ciba_ping_callback(job_id: str, req: CibaPingRequest):
+    # Keycloak sends the auth_req_id; fetch the actual token
+    token = await keycloak.fetch_token(
+        grant_type="urn:openid:params:grant-type:ciba",
+        auth_req_id=req.auth_req_id
+    )
+    validate(token, expected_scope="approve:send_email")  # sig, exp, scope
+    await job_store.mark_approved(job_id, token)
+    await redis.rpush("jobs:resume", job_id)
+    return {"status": "ok"}
+```
+
+Keycloak calls this once. The callback validates the token, records the approval, and drops the job_id into Redis. A worker picks it up and resumes the graph from its Postgres checkpoint. No polling, no sleeping threads, no long-lived connections.
+
+### What Survives Pod Restarts While Waiting
+
+| State | Where stored | Survives pod kill? |
+|---|---|---|
+| Workflow graph (messages, tool history, results) | Postgres checkpoint (EBS PVC) | Yes |
+| Pending approval record (auth_req_id, expires_at) | Postgres `pending_approvals` table | Yes |
+| Resume signal | Redis AOF queue (`jobs:resume`) | Yes — AOF persistence |
+| Active HTTP connection | Memory | No — but not needed; Keycloak holds the auth_req_id and will still call the callback |
+
+If every agent pod is killed while waiting for Sarah's approval, nothing is lost. The `auth_req_id` lives at Keycloak. When Sarah approves, Keycloak calls the callback URL, the callback enqueues the job_id, and any available worker picks it up and loads the checkpoint from Postgres.
+
+### What Happens When the TTL Expires Without Approval
+
+If Sarah does not approve within `cibaExpiresIn` seconds, Keycloak expires the `auth_req_id`. Any subsequent fetch of the token returns `expired_token`. The callback endpoint detects this, marks the job status as `approval_timeout`, and notifies Sarah that the approval window has closed. She must re-submit the original request to start a new workflow.
+
+The `expires_in` window is configurable per Keycloak realm and can be set differently for different flow types — short for interactive flows, long for compliance flows where the approver may not be available immediately.
+
+### Poll vs Ping — Decision Guide
+
+| | Poll | Ping |
+|---|---|---|
+| Approval window | Seconds to minutes | Minutes to days |
+| Agent while waiting | Active polling loop (must stay alive) | Checkpointed and exited (free) |
+| Infrastructure | No callback URL needed | Callback URL must be reachable by Keycloak |
+| Polling load | ~34,560 requests over 48h | 0 — one callback when Sarah approves |
+| Workflow state | In-memory (lost on pod restart) | Postgres checkpoint (survives anything) |
+| Use in this project | Interactive (Step 8 — Sarah is at her desk) | Compliance, board-level, multi-day approvals |
+
+See [Long-Running HITL — CIBA Ping Mode](usecase.md#long-running-hitl--ciba-ping-mode) in the use case document for the full implementation change list.
 
 ---
 
