@@ -160,7 +160,17 @@ Gateway pipeline:
 |---|---|---|
 | 3 | OPA policy | `confidential` data + `analyst` role → allow, but flag for audit ✓ |
 | 4 | LLM Judge | Intent: "portfolio exposure for Acme Corp" / Tool: `query_internal_db("Acme Corp")` → aligned ✓ |
-| 7 | HITL | Risk score 0.55 (confidential data) → below HITL threshold of 0.75 → no HITL |
+| 7 | HITL | Risk score 0.65 (confidential data, read-only, internal) → below CIBA threshold of 0.75 → no CIBA; mandatory audit flag applied |
+
+**Data classification → risk scoring:**
+
+| Classification | Example data | Base risk score | Control applied |
+|---|---|---|---|
+| `internal` | Org chart, cached public filings | 0.20–0.35 | Macaroon scope + OPA |
+| `confidential` | Portfolio exposure, fund performance | 0.60–0.70 | OPA mandatory audit flag; no CIBA |
+| `restricted` | M&A targets, board materials, trading strategies | 0.80+ | CIBA approval required |
+
+`query_internal_db` reads `confidential` data — it scores 0.65. CIBA is not triggered because the data stays internal and does not leave the system. If the data classification were `restricted`, CIBA would fire here too.
 
 The query executes. Results are tagged `data_classification: confidential` and are only visible to agents with the `internal_portfolio` data access caveat in their Macaroon.
 
@@ -202,7 +212,7 @@ All checks pass. The PDF report is generated and stored in the secure document s
 
 ---
 
-### Step 8 — Email Agent Sends the Report (Human-in-the-Loop Triggered)
+### Step 8 — Email Agent Sends the Report (CIBA-Gated HITL Triggered)
 
 The Orchestrator delegates Task D to the **Email Agent** with:
 ```
@@ -227,21 +237,56 @@ Gateway pipeline:
 | 2 | Macaroon scope | `send_email` allowed; `to` domain is `firm.com` ✓ |
 | 3 | OPA policy | Sending email with `confidential`-tagged attachment → elevated risk ✓ |
 | 4 | LLM Judge | Intent: "send report to investment team" / Tool: `send_email(to=investment-team@firm.com)` → aligned ✓ |
-| 7 | HITL | Risk score **0.82** (external communication + confidential attachment) → **HITL triggered** |
+| 7 | HITL | Risk score **0.82** (external communication + confidential attachment) → **CIBA approval required** |
 
-**Human-in-the-loop pause:**
-Sarah receives a Slack notification:
+**CIBA backchannel approval flow:**
+
+The Gateway halts execution and instructs the Orchestrator to initiate a **CIBA request** to Keycloak on behalf of Sarah:
+
 ```
-Action pending your approval:
-  Agent:      Email Agent (intent-8a3f2c1d)
-  Action:     send_email
-  To:         investment-team@firm.com
-  Attachment: Competitive Analysis — Acme Corp Q1 2026 (confidential)
-
-[Approve]  [Reject]  [View Report]
+POST /realms/firm/protocol/openid-connect/ext/ciba/auth
+  login_hint:      sarah@firm.com
+  scope:           openid approve:send_email
+  binding_message: "Approve: Email Agent will send 'Competitive Analysis — Acme Corp
+                    Q1 2026 (CONFIDENTIAL)' to investment-team@firm.com"
+  client_id:       orchestrator-agent
 ```
 
-Sarah reviews the report and clicks **Approve**. The gateway resumes execution. The email is sent.
+Keycloak returns immediately:
+```
+auth_req_id: ciba-req-9d4e1a2b
+expires_in:  300
+interval:    5
+```
+
+Keycloak calls the **ACP** (`acp.firm.internal`), which routes to Sarah's registered channel:
+
+- **SMS via AWS SNS**: "Agent action requires your approval — 'Approve: Email Agent will send Competitive Analysis — Acme Corp Q1 2026 (CONFIDENTIAL) to investment-team@firm.com'. Reply at: https://auth.rj-lab.click/ciba/approve?req=ciba-req-9d4e1a2b"
+- **Duo Mobile push** (if registered): displays the binding message with **Approve / Deny** buttons.
+
+Sarah reads the binding message, recognises the action, and taps **Approve** on her phone (authenticated via Face ID).
+
+The Orchestrator polls the token endpoint every 5 seconds:
+```
+POST /realms/firm/protocol/openid-connect/token
+  grant_type:  urn:openid:params:grant-type:ciba
+  auth_req_id: ciba-req-9d4e1a2b
+```
+
+On approval, Keycloak returns a signed JWT:
+```json
+{
+  "sub":   "sarah@firm.com",
+  "scope": "openid approve:send_email",
+  "iat":   1746604565,
+  "exp":   1746604865,
+  "auth_req_id": "ciba-req-9d4e1a2b"
+}
+```
+
+The Gateway validates the token (signature, `exp`, scope = `approve:send_email`), attaches `auth_req_id` to the OTel span, and resumes execution. The email is sent.
+
+> **Why CIBA and not a Slack button?** A Slack approval is an internal flag — any process with Slack API access could set it. The CIBA token is a JWT signed by Keycloak, containing Sarah's `sub` and the approved scope. It is verifiable by any downstream system independently of the agent, survives log forensics, and cannot be forged without Keycloak's private key.
 
 ---
 
@@ -257,14 +302,16 @@ intent_id: intent-8a3f2c1d  (sarah@firm.com — "Research Acme Corp...")
 ├── [09:15:03] web_search("Acme Corp Q1 2026 financials")           ALLOWED
 │   └── [09:15:04] indirect_prompt_injection DETECTED + STRIPPED
 │
-├── [09:15:08] query_internal_db("Acme Corp")                       ALLOWED
+├── [09:15:08] query_internal_db("Acme Corp")          risk=0.65   ALLOWED + AUDIT FLAGGED
 │   └── [09:15:09] web_search (unexpected call by internal-data agent) BLOCKED
 │
 ├── [09:15:15] generate_report(data=[...], format="PDF")            ALLOWED
 │
 └── [09:15:22] send_email(to="investment-team@firm.com", ...)
-    └── [09:15:22] HITL triggered — awaiting Sarah's approval
-    └── [09:16:05] Sarah approved
+    └── [09:15:22] risk=0.82 — CIBA initiated (auth_req_id: ciba-req-9d4e1a2b)
+    └── [09:15:23] ACP notified — SMS + Duo push sent to sarah@firm.com
+    └── [09:16:05] Sarah approved via Duo Mobile (Face ID) — CIBA token issued
+    └── [09:16:05] Gateway validated token: sig ✓ exp ✓ scope=approve:send_email ✓
     └── [09:16:06] email sent                                        ALLOWED
 ```
 
@@ -283,6 +330,7 @@ Every span carries `intent_id`, `agent_id`, `policy_decision`, and `macaroon_cav
 | Runaway agent sends hundreds of emails | Step 8 | Envoy rate limiter enforces per-agent per-tool request quota |
 | High-stakes action executed without human review | Step 8 | Risk score threshold triggers HITL; action paused until Sarah approves |
 | Sub-agent inherits full parent permissions | Steps 3–8 | Macaroon attenuation ensures each sub-agent's scope is strictly narrower than its parent's |
+| Confidential data read by a compromised agent without oversight | Step 5 | Risk score 0.65 triggers mandatory OPA audit flag; full OTel trace; Macaroon restricts result to `internal_portfolio` caveat holders only |
 | Compromised agent impersonates another agent | All steps | mTLS with SPIFFE SVIDs — each agent presents its own certificate; impersonation requires compromising the SPIRE-issued cert |
 
 ---
