@@ -78,6 +78,12 @@ releases:
           - apply
           - -f
           - {{ env "REPO_ROOT" }}/helmfile/phase1/manifests/security-gateway-ingress.yaml
+      - events: ["postsync"]
+        command: "kubectl"
+        args:
+          - apply
+          - -f
+          - {{ env "REPO_ROOT" }}/helmfile/phase1/manifests/alb-ingress.yaml
 
   # ── Consul ────────────────────────────────────────────────────────────────
 

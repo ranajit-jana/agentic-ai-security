@@ -9,6 +9,7 @@ require_tool kubectl
 check_aws_auth
 
 export REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+REGION=$(aws configure get region)
 HELMFILE_PATH="${REPO_ROOT}/helmfile/phase1/helmfile.yaml.gotmpl"
 
 # ── Install helm ──────────────────────────────────────────────────────────────
@@ -77,4 +78,56 @@ cd "${REPO_ROOT}"
 helmfile sync -f "${HELMFILE_PATH}"
 
 log "Phase 1 deployment complete"
+
+# ── Wire Route 53 ALIAS records → ALB ────────────────────────────────────────
+
+R53_ZONE_ID="${R53_ZONE_ID:-Z02035941A90NEJDXI763}"
+DOMAIN="${DOMAIN:-rj-lab.click}"
+SUBDOMAINS=("auth" "gateway" "keycloak" "grafana")
+
+log "Waiting for ALB hostname from platform-public-alb ingress..."
+ALB_HOSTNAME=""
+for i in $(seq 1 20); do
+  ALB_HOSTNAME=$(kubectl get ingress platform-public-alb -n istio-system \
+    -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
+  if [ -n "$ALB_HOSTNAME" ]; then break; fi
+  log "  [$i/20] ALB not ready yet, retrying in 15s..."
+  sleep 15
+done
+
+if [ -z "$ALB_HOSTNAME" ]; then
+  log "WARNING: ALB hostname not available after 5 min — skipping Route 53 update. Re-run this script once the ALB is ready."
+else
+  log "ALB hostname: $ALB_HOSTNAME"
+  ALB_ZONE_ID=$(aws elbv2 describe-load-balancers --region "$REGION" \
+    --query "LoadBalancers[?DNSName=='${ALB_HOSTNAME}'].CanonicalHostedZoneId" \
+    --output text)
+
+  CHANGES="["
+  for SUB in "${SUBDOMAINS[@]}"; do
+    CHANGES+=$(cat <<EOF
+{
+  "Action": "UPSERT",
+  "ResourceRecordSet": {
+    "Name": "${SUB}.${DOMAIN}",
+    "Type": "A",
+    "AliasTarget": {
+      "HostedZoneId": "${ALB_ZONE_ID}",
+      "DNSName": "${ALB_HOSTNAME}",
+      "EvaluateTargetHealth": true
+    }
+  }
+},
+EOF
+)
+  done
+  CHANGES="${CHANGES%,}]"
+
+  aws route53 change-resource-record-sets \
+    --hosted-zone-id "$R53_ZONE_ID" \
+    --change-batch "{\"Changes\": ${CHANGES}}" \
+    --query 'ChangeInfo.Status' --output text
+  log "Route 53 ALIAS records created for: ${SUBDOMAINS[*]} → ${ALB_HOSTNAME}"
+fi
+
 log "Run ./scripts/validate_phase1.sh to verify"

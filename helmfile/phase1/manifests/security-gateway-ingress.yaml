@@ -17,6 +17,10 @@ spec:
         - "vault.firm.internal"
         - "grafana.firm.internal"
         - "consul.firm.internal"
+        - "auth.rj-lab.click"
+        - "gateway.rj-lab.click"
+        - "keycloak.rj-lab.click"
+        - "grafana.rj-lab.click"
 ---
 # Security Gateway
 apiVersion: networking.istio.io/v1beta1
@@ -27,6 +31,7 @@ metadata:
 spec:
   hosts:
     - "gateway.firm.internal"
+    - "gateway.rj-lab.click"
   gateways:
     - istio-system/platform-ingress
   http:
@@ -45,6 +50,8 @@ metadata:
 spec:
   hosts:
     - "keycloak.firm.internal"
+    - "auth.rj-lab.click"
+    - "keycloak.rj-lab.click"
   gateways:
     - istio-system/platform-ingress
   http:
@@ -81,6 +88,7 @@ metadata:
 spec:
   hosts:
     - "grafana.firm.internal"
+    - "grafana.rj-lab.click"
   gateways:
     - istio-system/platform-ingress
   http:

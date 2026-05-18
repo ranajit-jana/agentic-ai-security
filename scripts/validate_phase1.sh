@@ -122,6 +122,35 @@ check "Audit logs endpoint reachable" \
    | jq -r '.status' | grep -q success"
 
 echo ""
+echo "── Public Ingress (ALB + DNS + TLS) ────────"
+DOMAIN="${DOMAIN:-rj-lab.click}"
+check "AWS LBC pods running" \
+  "kubectl get pods -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller --no-headers | grep -q Running"
+check "ALB Ingress has hostname" \
+  "kubectl get ingress platform-public-alb -n istio-system \
+   -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' | grep -q elb"
+check "DNS resolves auth.${DOMAIN}" \
+  "dig +short auth.${DOMAIN} | grep -qE '^[0-9]+\.[0-9]+'"
+check "DNS resolves gateway.${DOMAIN}" \
+  "dig +short gateway.${DOMAIN} | grep -qE '^[0-9]+\.[0-9]+'"
+check "DNS resolves keycloak.${DOMAIN}" \
+  "dig +short keycloak.${DOMAIN} | grep -qE '^[0-9]+\.[0-9]+'"
+check "DNS resolves grafana.${DOMAIN}" \
+  "dig +short grafana.${DOMAIN} | grep -qE '^[0-9]+\.[0-9]+'"
+check "HTTP redirects to HTTPS on auth.${DOMAIN}" \
+  "curl -s -o /dev/null -w '%{http_code}' --max-time 10 http://auth.${DOMAIN} \
+   | grep -qE '^30[12378]$'"
+check "TLS cert is wildcard *.${DOMAIN}" \
+  "echo | openssl s_client -connect auth.${DOMAIN}:443 -servername auth.${DOMAIN} 2>/dev/null \
+   | openssl x509 -noout -subject | grep -q '\*.${DOMAIN}'"
+check "HTTPS responds on auth.${DOMAIN} (Keycloak)" \
+  "curl -sf -o /dev/null --max-time 15 https://auth.${DOMAIN}"
+check "HTTPS responds on gateway.${DOMAIN}/health" \
+  "curl -sf -o /dev/null --max-time 15 https://gateway.${DOMAIN}/health"
+check "HTTPS responds on grafana.${DOMAIN}" \
+  "curl -sf -o /dev/null --max-time 15 https://grafana.${DOMAIN}"
+
+echo ""
 echo "═══════════════════════════════════════════"
 echo " Results: ${PASS} passed, ${FAIL} failed"
 echo "═══════════════════════════════════════════"
