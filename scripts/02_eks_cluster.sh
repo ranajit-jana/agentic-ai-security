@@ -58,7 +58,8 @@ vpc:
     gateway: Single
 managedNodeGroups:
   - name: system
-    instanceType: t3.medium
+    instanceTypes: [t3.medium, t3a.medium, t3.large]
+    spot: true
     minSize: 3
     maxSize: 4
     desiredCapacity: 3
@@ -68,7 +69,8 @@ managedNodeGroups:
       k8s.io/cluster-autoscaler/enabled: "true"
       k8s.io/cluster-autoscaler/${CLUSTER_NAME}: "owned"
   - name: application
-    instanceType: t3.large
+    instanceTypes: [t3.large, t3a.large, m5.large]
+    spot: true
     minSize: 2
     maxSize: 4
     desiredCapacity: 2
@@ -78,19 +80,25 @@ managedNodeGroups:
       k8s.io/cluster-autoscaler/enabled: "true"
       k8s.io/cluster-autoscaler/${CLUSTER_NAME}: "owned"
   - name: observability
-    instanceType: t3.medium
+    instanceTypes: [t3.medium, t3a.medium]
+    spot: true
     minSize: 1
     maxSize: 2
     desiredCapacity: 1
     labels: {role: observability}
     privateNetworking: true
   - name: inference
-    instanceType: t3.xlarge
-    minSize: 2
-    maxSize: 3
-    desiredCapacity: 2
+    instanceTypes: [g4dn.xlarge, g4dn.2xlarge]
+    spot: true
+    minSize: 1
+    maxSize: 2
+    desiredCapacity: 1
     labels: {role: inference}
     privateNetworking: true
+    taints:
+      - key: nvidia.com/gpu
+        value: "true"
+        effect: NoSchedule
     tags:
       k8s.io/cluster-autoscaler/enabled: "true"
       k8s.io/cluster-autoscaler/${CLUSTER_NAME}: "owned"
@@ -210,4 +218,14 @@ else
   log "AWS Load Balancer Controller installed"
 fi
 
-log "EKS cluster ready"
+# ── NVIDIA device plugin ──────────────────────────────────────────────────────
+# Required for GPU nodes — exposes nvidia.com/gpu as a schedulable resource.
+# The EKS-optimised GPU AMI (used automatically with g4dn instances) includes
+# the NVIDIA driver; this DaemonSet makes the GPU visible to Kubernetes.
+
+log "Installing NVIDIA device plugin..."
+kubectl apply -f \
+  https://raw.githubusercontent.com/NVIDIA/k8s-device-plugin/v0.14.5/nvidia-device-plugin.yml
+log "NVIDIA device plugin installed"
+
+log "EKS cluster ready — all nodegroups on spot"

@@ -1,15 +1,28 @@
 fullnameOverride: ollama-embed
+
 ollama:
   gpu:
-    enabled: false
+    enabled: true
+    type: nvidia
+    number: 1
   models:
     - nomic-embed-text
+
 nodeSelector:
   role: inference
+
+tolerations:
+  - key: nvidia.com/gpu
+    operator: Equal
+    value: "true"
+    effect: NoSchedule
+
 resources:
   requests:
     cpu: 500m
-    memory: 2Gi
+    memory: 1Gi
+    nvidia.com/gpu: "1"
   limits:
     cpu: 1000m
-    memory: 3Gi
+    memory: 2Gi
+    nvidia.com/gpu: "1"

@@ -169,10 +169,15 @@ After all releases are deployed and vault is initialised:
   bash scripts/validate.sh
 
 ── NODEGROUPS ───────────────────────────────────────────
-  system        t3.medium  3 nodes (min 3, max 4)  role=system
-  application   t3.large   2 nodes (min 2, max 4)  role=application
-  observability t3.medium  1 node  (min 1, max 2)  role=observability
-  inference     t3.xlarge  2 nodes (min 2, max 3)  role=inference
+  All nodegroups run on SPOT instances (~60-70% cheaper than on-demand).
+  Multiple instance types per group = better spot availability.
+
+  system        spot  t3.medium/t3a.medium/t3.large   3 nodes  role=system
+  application   spot  t3.large/t3a.large/m5.large      2 nodes  role=application
+  observability spot  t3.medium/t3a.medium              1 node   role=observability
+  inference     spot  g4dn.xlarge/g4dn.2xlarge          1 node   role=inference
+                      (NVIDIA T4 GPU, 16GB VRAM)
+                      (tainted: nvidia.com/gpu=true:NoSchedule)
 
   Workload placement:
     system:        istiod, spire, consul, vault, keycloak,
@@ -181,11 +186,16 @@ After all releases are deployed and vault is initialised:
     application:   all AI agents
     observability: otel-collector, loki, grafana
     inference:     ollama-judge, ollama-policy, ollama-embed
-                   (t3.xlarge needed — llama3.1:8b uses ~6 GB RAM)
+                   (GPU — llama3.1:8b ~35-50 tokens/sec vs ~5-8 on CPU)
 
   Scale system nodegroup if pods are evicted/OOMKilled:
     eksctl scale nodegroup --cluster agentic-security \
       --region ap-south-1 --name system --nodes 4
+
+  Note on spot interruptions:
+    All workloads restart cleanly on new spot nodes.
+    Vault auto-unseals via KMS. Ollama reloads model in ~2-3 min.
+    EKS managed nodegroups use capacity rebalancing to minimise disruption.
 
 ── KEYCLOAK USER MANAGEMENT ─────────────────────────────
 Keycloak admin secret name: keycloak-admin (fields: username, password)

@@ -327,16 +327,18 @@ every security enforcement point.
 ╔══════════════════════════════════════════════════════════════════════════════════╗
 ║  AWS INFRASTRUCTURE                       region: ap-south-1                     ║
 ║                                                                                  ║
-║   EKS Cluster: agentic-security  (Kubernetes 1.35)                              ║
-║     ├── Nodegroup: system        3 × t3.medium   (4GB)  role=system             ║
+║   EKS Cluster: agentic-security  (Kubernetes 1.35)  — ALL NODEGROUPS ON SPOT   ║
+║     ├── Nodegroup: system        3 × t3.medium/t3a.medium   SPOT  role=system  ║
 ║     │     Pods: istiod, spire, consul, vault, keycloak, opa, redis,             ║
 ║     │           security-gateway, ciba-acp, tool-catalog, opal,                 ║
 ║     │           litellm, kafka, flink, clickhouse                               ║
-║     ├── Nodegroup: application   2 × t3.large    (8GB)  role=application        ║
+║     ├── Nodegroup: application   2 × t3.large/t3a.large      SPOT  role=app    ║
 ║     │     Pods: agents (orchestrator, web-search, internal-data, email, report) ║
-║     ├── Nodegroup: observability 1 × t3.medium   (4GB)  role=observability      ║
+║     ├── Nodegroup: observability 1 × t3.medium/t3a.medium    SPOT  role=obs    ║
 ║     │     Pods: otel-collector, loki, grafana, prometheus                       ║
-║     └── Nodegroup: inference     2 × t3.xlarge   (16GB) role=inference          ║
+║     └── Nodegroup: inference     1 × g4dn.xlarge/g4dn.2xlarge SPOT role=inf   ║
+║           GPU: NVIDIA T4 (16GB VRAM) — all 3 Ollama models on 1 node           ║
+║           Taint: nvidia.com/gpu=true:NoSchedule                                 ║
 ║           Pods: ollama-judge, ollama-policy, ollama-embed                       ║
 ║                                                                                  ║
 ║   Persistent resources (survive nightly destroy):                                ║
@@ -499,21 +501,26 @@ every security enforcement point.
 
 ## Cost Summary — Full Stack Running (10h/day, nightly destroy)
 
-| Layer | Components | Cost/month |
-|---|---|---|
-| EKS control plane | 1 cluster | ~$72 |
-| system nodegroup | 3 × t3.medium | ~$55 |
-| application nodegroup | 2 × t3.large | ~$60 |
-| observability nodegroup | 1 × t3.medium | ~$18 |
-| inference nodegroup | 2 × t3.xlarge | ~$110 |
-| NAT Gateway | 1 | ~$14 |
-| ALB | 1 | ~$7 |
-| EBS (Kafka 60Gi + ClickHouse 30Gi + misc) | ~110 Gi | ~$11 |
-| KMS + ECR + SNS + ACM + Route53 | persistent | ~$2 |
-| **Total** | | **~$349/month** |
+All EC2 nodegroups run on **spot instances**. Multiple instance types per group
+reduce interruption risk. EKS managed nodegroup capacity rebalancing handles spot
+reclamation gracefully — all workloads restart cleanly.
 
-Compared to running 24/7 (no nightly destroy): ~$1,050/month.
-Nightly destroy saves ~$700/month.
+| Layer | Components | On-demand/month | **Spot/month** |
+|---|---|---|---|
+| EKS control plane | 1 cluster | $72 | $72 (not spot-able) |
+| system nodegroup | 3 × t3.medium spot | ~$41 | **~$13** |
+| application nodegroup | 2 × t3.large spot | ~$55 | **~$17** |
+| observability nodegroup | 1 × t3.medium spot | ~$14 | **~$4** |
+| inference nodegroup | 1 × g4dn.xlarge spot (GPU) | ~$158 | **~$47** |
+| NAT Gateway | 1 | $14 | $14 |
+| ALB | 1 | $7 | $7 |
+| EBS (Kafka + ClickHouse + misc) | ~110 Gi | $11 | $11 |
+| KMS + ECR + SNS + ACM + Route53 | persistent | $2 | $2 |
+| **Total** | | **~$374** | **~$187/month** |
+
+Spot saves **~$187/month** vs on-demand.
+Nightly destroy (10h/day vs 24/7) saves a further ~$187/month.
+**Running cost with both: ~$187/month vs ~$748/month always-on on-demand.**
 
 ### What OpenSearch would have added (removed)
 

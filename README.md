@@ -259,10 +259,10 @@ bash scripts/validate.sh
 
 | Resource | Per month |
 |---|---|
-| EC2 nodes (8 nodes: 3×t3.medium + 2×t3.large + 1×t3.medium + 2×t3.xlarge) | ~$350–420 |
+| EC2 nodes — spot (3×t3.medium + 2×t3.large + 1×t3.medium + 1×g4dn.xlarge) | ~$81 |
 | EKS control plane | ~$72 |
-| NAT Gateway | ~$33 |
-| ALB | ~$16 |
+| NAT Gateway | ~$14 |
+| ALB | ~$7 |
 
 **What stays (free or <$2/month):**
 
@@ -342,12 +342,14 @@ bash scripts/validate_phase3.sh
 
 ### Node Groups
 
-| Group | Type | Count | Workloads |
+All nodegroups run **spot instances** (~70% cheaper than on-demand). Multiple instance types per group improve spot availability.
+
+| Group | Types (spot) | Count | Workloads |
 |---|---|---|---|
-| `system` | `t3.medium` | 3 | CoreDNS · Consul · SPIRE · Istio · Vault · Keycloak · OPA · Gateway · OPAL · Tool Catalog |
-| `application` | `t3.large` | 2–4 | Agents · LiteLLM |
-| `observability` | `t3.medium` | 1–2 | OTel · Loki · Grafana |
-| `inference` | `t3.xlarge` | 2–3 | Ollama judge · Ollama policy · Ollama embed (llama3.1:8b needs 6 GB) |
+| `system` | `t3.medium` · `t3a.medium` · `t3.large` | 3 | CoreDNS · Consul · SPIRE · Istio · Vault · Keycloak · OPA · Gateway · OPAL · Tool Catalog |
+| `application` | `t3.large` · `t3a.large` · `m5.large` | 2–4 | Agents · LiteLLM |
+| `observability` | `t3.medium` · `t3a.medium` | 1–2 | OTel · Loki · Grafana |
+| `inference` | `g4dn.xlarge` · `g4dn.2xlarge` | 1–2 | Ollama judge · Ollama policy · Ollama embed — NVIDIA T4 GPU, 35–50 tokens/sec |
 
 ---
 
