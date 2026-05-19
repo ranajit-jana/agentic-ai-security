@@ -1,0 +1,16 @@
+db:
+  useExisting: true  # skip bundled postgres — basic model routing works without DB
+
+model_list:
+  - model_name: claude-sonnet-4-6
+    litellm_params:
+      model: anthropic/claude-sonnet-4-6
+      api_key: os.environ/ANTHROPIC_API_KEY
+  - model_name: ollama-judge
+    litellm_params:
+      model: ollama/llama3.1:8b
+      api_base: http://ollama-judge.infra.svc.cluster.local:11434
+  - model_name: ollama-policy
+    litellm_params:
+      model: ollama/llama3.1:8b
+      api_base: http://ollama-policy.infra.svc.cluster.local:11434

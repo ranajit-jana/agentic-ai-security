@@ -1,0 +1,6 @@
+apiVersion: v2
+name: tool-catalog
+description: Intent-Aware Tool Catalog — filters available MCP tools by agent intent using OPA policy and LLM judge
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

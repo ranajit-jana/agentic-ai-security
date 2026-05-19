@@ -182,9 +182,6 @@ repositories:
     url: https://permitio.github.io/opal-helm-chart
   - name: litellm
     url: https://helm.litellm.ai
-  - name: bitnami
-    url: https://charts.bitnami.com/bitnami
-
 helmDefaults:
   wait: true
   timeout: 600

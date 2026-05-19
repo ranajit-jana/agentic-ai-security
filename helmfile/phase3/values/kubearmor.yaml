@@ -1,0 +1,12 @@
+# Block mode: syscall violations denied, not just logged.
+defaultFilePosture: block
+defaultNetworkPosture: block
+defaultCapabilitiesPosture: audit
+
+kubearmorRelay:
+  enabled: true
+
+# SPIFFE identity awareness — scopes policies to SPIRE SVIDs not just pod labels
+spiffe:
+  enabled: true
+  socketPath: /run/spire/sockets/agent.sock

@@ -1,0 +1,29 @@
+replicas: 3
+
+persistence:
+  size: 30Gi
+
+resources:
+  requests:
+    memory: 2Gi
+    cpu: 500m
+  limits:
+    memory: 4Gi
+    cpu: 2000m
+
+extraEnvs:
+  - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: opensearch-credentials
+        key: admin_password
+  - name: OPENSEARCH_JAVA_OPTS
+    value: "-Xms1g -Xmx1g"
+
+plugins:
+  enabled: true
+  installList:
+    - opensearch-security-analytics
+
+nodeSelector:
+  role: system

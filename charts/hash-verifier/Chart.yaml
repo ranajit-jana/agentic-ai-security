@@ -1,0 +1,6 @@
+apiVersion: v2
+name: hash-verifier
+description: Tool Hash Verifier CronJob — verifies OCI image digest and MCP manifest hash for registered tools every 60s
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

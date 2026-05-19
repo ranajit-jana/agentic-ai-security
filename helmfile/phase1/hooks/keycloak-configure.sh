@@ -7,62 +7,59 @@ kubectl wait pod -n infra -l app=keycloak --for=condition=Ready --timeout=300s
 ADMIN_PASS=$(kubectl get secret keycloak-admin -n infra \
   -o jsonpath='{.data.password}' | base64 -d)
 
-KEYCLOAK_URL="http://keycloak.infra.svc.cluster.local"
+KCADM="kubectl exec -n infra statefulset/keycloak -- /opt/keycloak/bin/kcadm.sh"
 
-# Get admin token from inside the cluster via ciba-acp pod
-TOKEN=$(kubectl exec -n infra deploy/ciba-acp -- \
-  curl -sf --max-time 10 -X POST \
-  "${KEYCLOAK_URL}/realms/master/protocol/openid-connect/token" \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "client_id=admin-cli&username=admin&password=${ADMIN_PASS}&grant_type=password" \
-  | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+# Authenticate
+$KCADM config credentials \
+  --server http://localhost:8080 \
+  --realm master \
+  --user admin \
+  --password "${ADMIN_PASS}"
 
 # Create firm-internal realm
-kubectl exec -n infra deploy/ciba-acp -- \
-  curl -sf --max-time 10 -X POST "${KEYCLOAK_URL}/admin/realms" \
-  -H "Authorization: Bearer ${TOKEN}" \
-  -H "Content-Type: application/json" \
-  -d '{"realm":"firm-internal","enabled":true,"displayName":"Firm Internal"}' 2>/dev/null || true
+$KCADM create realms \
+  -s realm=firm-internal \
+  -s enabled=true \
+  -s displayName="Firm Internal" 2>/dev/null || true
 
 # Enable CIBA on the realm
-kubectl exec -n infra deploy/ciba-acp -- \
-  curl -sf --max-time 10 -X PUT "${KEYCLOAK_URL}/admin/realms/firm-internal" \
-  -H "Authorization: Bearer ${TOKEN}" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "attributes": {
-      "cibaBackchannelTokenDeliveryMode": "poll",
-      "cibaExpiresIn": "120",
-      "cibaInterval": "5",
-      "cibaAuthRequestedUserHint": "login_hint"
-    }
-  }'
+$KCADM update realms/firm-internal \
+  -s "attributes.cibaBackchannelTokenDeliveryMode=poll" \
+  -s "attributes.cibaExpiresIn=120" \
+  -s "attributes.cibaInterval=5" \
+  -s "attributes.cibaAuthRequestedUserHint=login_hint"
 
 # Create realm roles
 for role in analyst admin viewer; do
-  kubectl exec -n infra deploy/ciba-acp -- \
-    curl -sf --max-time 10 -X POST \
-    "${KEYCLOAK_URL}/admin/realms/firm-internal/roles" \
-    -H "Authorization: Bearer ${TOKEN}" \
-    -H "Content-Type: application/json" \
-    -d "{\"name\":\"$role\"}" 2>/dev/null || true
+  $KCADM create realms/firm-internal/roles -s name="${role}" 2>/dev/null || true
 done
 
 # Register CIBA ACP client
-kubectl exec -n infra deploy/ciba-acp -- \
-  curl -sf --max-time 10 -X POST \
-  "${KEYCLOAK_URL}/admin/realms/firm-internal/clients" \
-  -H "Authorization: Bearer ${TOKEN}" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "clientId": "ciba-acp",
-    "enabled": true,
-    "protocol": "openid-connect",
-    "publicClient": false,
-    "redirectUris": ["https://acp.firm.internal/*"],
-    "attributes": {
-      "backchannel.logout.session.required": "true"
-    }
-  }' 2>/dev/null || true
+$KCADM create realms/firm-internal/clients \
+  -s clientId=ciba-acp \
+  -s enabled=true \
+  -s protocol=openid-connect \
+  -s publicClient=false \
+  -s 'redirectUris=["https://acp.firm.internal/*"]' \
+  -s 'attributes.backchannel.logout.session.required=true' 2>/dev/null || true
+
+# Create user rana with analyst role
+$KCADM create realms/firm-internal/users \
+  -s username=rana \
+  -s enabled=true \
+  -s 'credentials=[{"type":"password","value":"changeme123","temporary":false}]' 2>/dev/null || true
+
+RANA_ID=$($KCADM get realms/firm-internal/users -q username=rana \
+  --fields id 2>/dev/null | python3 -c "import sys,json; data=json.load(sys.stdin); print(data[0]['id'])" 2>/dev/null || echo "")
+
+ANALYST_ID=$($KCADM get realms/firm-internal/roles/analyst \
+  --fields id 2>/dev/null | python3 -c "import sys,json; data=json.load(sys.stdin); print(data['id'])" 2>/dev/null || echo "")
+
+if [ -n "$RANA_ID" ] && [ -n "$ANALYST_ID" ]; then
+  $KCADM create realms/firm-internal/users/$RANA_ID/role-mappings/realm \
+    -r firm-internal \
+    -s "[{\"id\":\"${ANALYST_ID}\",\"name\":\"analyst\"}]" 2>/dev/null || true
+  echo "User rana created with analyst role"
+fi
 
 echo "Keycloak realm firm-internal with CIBA configured"

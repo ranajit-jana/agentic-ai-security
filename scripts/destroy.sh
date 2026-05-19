@@ -1,7 +1,7 @@
 #!/bin/bash
-# Destroy expensive Phase 1 resources — ALB, EKS cluster, and EC2 nodes.
-# Sequence: ALB ingress → LBC → LBC IAM → EKS cluster
-# Keeps: Route53, ACM certificates, KMS key, ECR, SNS, IAM roles (non-LBC).
+# Destroy expensive resources — ALB, EKS cluster, and EC2 nodes.
+# Sequence: ALB ingress → LBC helm release → EKS cluster
+# Keeps everything free: Route53, ACM, KMS, ECR, SNS, IAM roles and policies.
 set -euo pipefail
 source "$(dirname "$0")/lib/common.sh"
 load_env
@@ -12,20 +12,17 @@ require_tool eksctl
 CLUSTER_NAME="${CLUSTER_NAME:-agentic-security}"
 REGION=$(aws configure get region)
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-LBC_ROLE="AmazonEKSLoadBalancerControllerRole"
-LBC_POLICY="AWSLoadBalancerControllerIAMPolicy"
 
 echo ""
 echo "══════════════════════════════════════════════════════════════"
 echo " This will DELETE:"
 echo "   • ALB (platform-public-alb ingress)"
-echo "   • AWS Load Balancer Controller"
-echo "   • LBC IAM role and policy"
+echo "   • AWS Load Balancer Controller (helm release)"
 echo "   • EKS cluster $CLUSTER_NAME and all EC2 nodes"
 echo ""
 echo " Region:  $REGION  |  Account: $ACCOUNT_ID"
 echo ""
-echo " Kept: KMS key, ECR repos, SNS topics, ACM certs, IAM roles"
+echo " Kept (free): KMS key, ECR, SNS, ACM, Route 53, IAM roles/policies"
 echo "══════════════════════════════════════════════════════════════"
 echo ""
 read -r -p "Type 'destroy' to confirm: " CONFIRM
@@ -53,21 +50,8 @@ else
   log "LBC helm release not found — skipping"
 fi
 
-# ── Step 3: Remove LBC IAM role and policy ────────────────────────────────────
-if aws iam get-role --role-name "$LBC_ROLE" &>/dev/null 2>&1; then
-  log "Detaching and deleting LBC IAM role..."
-  aws iam detach-role-policy \
-    --role-name "$LBC_ROLE" \
-    --policy-arn "arn:aws:iam::${ACCOUNT_ID}:policy/${LBC_POLICY}" 2>/dev/null || true
-  aws iam delete-role --role-name "$LBC_ROLE"
-  log "LBC IAM role deleted"
-fi
-
-if aws iam get-policy --policy-arn "arn:aws:iam::${ACCOUNT_ID}:policy/${LBC_POLICY}" &>/dev/null 2>&1; then
-  log "Deleting LBC IAM policy..."
-  aws iam delete-policy --policy-arn "arn:aws:iam::${ACCOUNT_ID}:policy/${LBC_POLICY}"
-  log "LBC IAM policy deleted"
-fi
+# ── Step 3: LBC IAM role and policy — kept (IAM is free, reused on rebuild) ───
+log "Skipping LBC IAM role/policy deletion — IAM resources are free and reused on rebuild"
 
 # ── Step 4: Delete EKS cluster ────────────────────────────────────────────────
 if eksctl get cluster --name "$CLUSTER_NAME" --region "$REGION" &>/dev/null; then

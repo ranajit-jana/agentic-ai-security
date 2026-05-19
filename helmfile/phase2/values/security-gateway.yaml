@@ -1,0 +1,19 @@
+image:
+  tag: phase2
+
+env:
+  CEDAR_ENABLED: "true"
+  BISCUIT_ENABLED: "true"
+  LLM_GUARD_ENABLED: "true"
+  OLLAMA_EMBED_URL: "http://ollama-embed.infra.svc.cluster.local:11434"
+  OPA_URL: "http://opa.infra.svc.cluster.local:8181"
+  INJECTION_SIGNALS_PATH: "/data/injection_signals.pkl"
+
+volumeMounts:
+  - name: signal-data
+    mountPath: /data
+
+volumes:
+  - name: signal-data
+    persistentVolumeClaim:
+      claimName: injection-signals-pvc

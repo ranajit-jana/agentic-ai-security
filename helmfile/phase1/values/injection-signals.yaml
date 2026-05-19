@@ -1,0 +1,6 @@
+ollama:
+  embedUrl: "http://ollama-embed.infra.svc.cluster.local:11434"
+  model: "nomic-embed-text"
+storage:
+  pvcName: injection-signals-pvc
+  size: 1Gi

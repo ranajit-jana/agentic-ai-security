@@ -1,0 +1,15 @@
+fullnameOverride: ollama-embed
+ollama:
+  gpu:
+    enabled: false
+  models:
+    - nomic-embed-text
+nodeSelector:
+  role: inference
+resources:
+  requests:
+    cpu: 500m
+    memory: 2Gi
+  limits:
+    cpu: 1000m
+    memory: 3Gi

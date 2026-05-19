@@ -1,0 +1,22 @@
+replicaCount: 1
+image:
+  repository: python
+  tag: "3.11-slim"
+  pullPolicy: IfNotPresent
+nodeSelector:
+  role: system
+env:
+  OPA_URL: "http://opa.infra.svc.cluster.local:8181"
+  OLLAMA_JUDGE_URL: "http://ollama-judge.infra.svc.cluster.local:11434"
+  CONSUL_URL: "http://consul.infra.svc.cluster.local:8500"
+serviceAccount:
+  name: tool-catalog
+service:
+  port: 8000
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi

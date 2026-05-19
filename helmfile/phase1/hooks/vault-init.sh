@@ -41,6 +41,13 @@ else
     echo "=========================================================="
     echo ""
 
+    # Save root token to scripts/.env for use by subsequent hooks
+    ROOT_TOKEN=$(echo "$INIT_OUT" | grep "Initial Root Token:" | awk '{print $NF}')
+    SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../scripts" && pwd)"
+    grep -v "^VAULT_ROOT_TOKEN=" "${SCRIPTS_DIR}/.env" 2>/dev/null > "${SCRIPTS_DIR}/.env.tmp" || true
+    echo "VAULT_ROOT_TOKEN=${ROOT_TOKEN}" >> "${SCRIPTS_DIR}/.env.tmp"
+    mv "${SCRIPTS_DIR}/.env.tmp" "${SCRIPTS_DIR}/.env"
+
     # Also persist in a K8s Secret as a second safety net
     kubectl create secret generic vault-init-keys \
       --from-literal=init-output="$INIT_OUT" \

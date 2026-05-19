@@ -257,8 +257,6 @@ repositories:
     url: https://spiffe.github.io/helm-charts-hardened
   - name: hashicorp
     url: https://helm.releases.hashicorp.com
-  - name: bitnami
-    url: https://charts.bitnami.com/bitnami
   - name: opa
     url: https://open-policy-agent.github.io/kube-mgmt/charts
   - name: open-telemetry
@@ -345,7 +343,7 @@ releases:
 
   - name: keycloak
     namespace: infra
-    chart: bitnami/keycloak
+    chart: ./charts/keycloak
     needs:
       - infra/vault
     values:
@@ -383,7 +381,7 @@ releases:
 
   - name: redis
     namespace: infra
-    chart: bitnami/redis
+    chart: ./charts/redis
     values:
       - values/redis.yaml
 

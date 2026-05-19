@@ -1,0 +1,16 @@
+opal-server:
+  dataSourceConfig:
+    entries:
+      - url: "http://consul.infra.svc.cluster.local:8500/v1/kv/agents?recurse=true"
+        topics:
+          - agents
+      - url: "http://consul.infra.svc.cluster.local:8500/v1/kv/tools?recurse=true"
+        topics:
+          - tools
+  broadcastChannelRoot: "opal"
+
+opal-client:
+  opaServerUrl: "http://opa.infra.svc.cluster.local:8181"
+  policySubscriptionTopics:
+    - agents
+    - tools

@@ -18,13 +18,16 @@ spec:
       serviceAccountName: {{ .Values.serviceAccount.name }}
       nodeSelector:
         {{- toYaml .Values.nodeSelector | nindent 8 }}
-      {{- if .Values.spireSocket.enabled }}
       volumes:
+        {{- if .Values.spireSocket.enabled }}
         - name: spire-agent-socket
           hostPath:
             path: {{ .Values.spireSocket.hostPath }}
             type: DirectoryOrCreate
-      {{- end }}
+        {{- end }}
+        {{- if .Values.extraVolumes }}
+        {{- toYaml .Values.extraVolumes | nindent 8 }}
+        {{- end }}
       containers:
         - name: security-gateway
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -36,12 +39,15 @@ spec:
             - name: {{ $key }}
               value: {{ $val | quote }}
             {{- end }}
-          {{- if .Values.spireSocket.enabled }}
           volumeMounts:
+            {{- if .Values.spireSocket.enabled }}
             - name: spire-agent-socket
               mountPath: /run/spire/sockets
               readOnly: true
-          {{- end }}
+            {{- end }}
+            {{- if .Values.extraVolumeMounts }}
+            {{- toYaml .Values.extraVolumeMounts | nindent 12 }}
+            {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           livenessProbe:

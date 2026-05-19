@@ -1,0 +1,6 @@
+env:
+  DUO_ENABLED: "true"
+
+envFrom:
+  - secretRef:
+      name: duo-credentials

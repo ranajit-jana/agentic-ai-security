@@ -1,0 +1,18 @@
+fullnameOverride: ollama-judge
+
+ollama:
+  gpu:
+    enabled: false
+  models:
+    - llama3.1:8b
+
+nodeSelector:
+  role: system
+
+resources:
+  requests:
+    cpu: 2000m
+    memory: 6Gi
+  limits:
+    cpu: 4000m
+    memory: 8Gi

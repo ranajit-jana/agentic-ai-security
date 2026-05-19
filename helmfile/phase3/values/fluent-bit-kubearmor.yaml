@@ -1,0 +1,48 @@
+daemonSetVolumes:
+  - name: spire-socket
+    hostPath:
+      path: /tmp/spire-agent/public
+      type: DirectoryOrCreate
+
+config:
+  inputs: |
+    [INPUT]
+        Name              kubearmor
+        Tag               kubearmor.*
+        kubearmor_endpoint  kubearmor-relay.kubearmor-system.svc.cluster.local:32767
+
+  filters: |
+    [FILTER]
+        Name   record_modifier
+        Match  kubearmor.*
+        Record source kubearmor
+        Record cluster agentic-security
+
+  outputs: |
+    [OUTPUT]
+        Name            opensearch
+        Match           kubearmor.*
+        Host            opensearch-cluster-master.observability.svc.cluster.local
+        Port            9200
+        Index           kubearmor
+        HTTP_User       admin
+        HTTP_Passwd     ${OPENSEARCH_ADMIN_PASSWORD}
+        tls             On
+        tls.verify      Off
+        Suppress_Type_Name On
+
+    [OUTPUT]
+        Name            loki
+        Match           kubearmor.*
+        Host            loki.observability.svc.cluster.local
+        Port            3100
+        Labels          job=kubearmor, source=kubearmor
+        Line_Format     json
+
+envFrom:
+  - secretRef:
+      name: opensearch-credentials
+
+nodeSelector: {}
+tolerations:
+  - operator: Exists

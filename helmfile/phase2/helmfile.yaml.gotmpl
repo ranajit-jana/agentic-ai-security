@@ -1,0 +1,129 @@
+repositories:
+  - name: ollama
+    url: https://otwld.github.io/ollama-helm
+  - name: permitio
+    url: https://permitio.github.io/opal-helm-chart
+helmDefaults:
+  wait: true
+  timeout: 600
+  createNamespace: true
+
+releases:
+
+  # ── Ollama — three isolated CPU inference instances ───────────────────────
+  # judge: LLM Judge for Intent-Aware Tool Catalog
+  # policy: Policy Generation + Validation LLM for Cedar
+  # embed: Embedding model for semantic injection detection
+  # NOTE: Running on CPU — model pulls take 5-10 min on first deploy
+
+  - name: ollama-judge
+    namespace: infra
+    chart: ollama/ollama
+    values:
+      - values/ollama-judge.yaml
+    hooks:
+      - events: ["postsync"]
+        command: "bash"
+        args: ["{{ env "REPO_ROOT" }}/helmfile/phase2/hooks/ollama-wait-models.sh", "ollama-judge", "llama3.1:8b"]
+
+  - name: ollama-policy
+    namespace: infra
+    chart: ollama/ollama
+    values:
+      - values/ollama-policy.yaml
+    hooks:
+      - events: ["postsync"]
+        command: "bash"
+        args: ["{{ env "REPO_ROOT" }}/helmfile/phase2/hooks/ollama-wait-models.sh", "ollama-policy", "llama3.1:8b"]
+
+  - name: ollama-embed
+    namespace: infra
+    chart: ollama/ollama
+    values:
+      - values/ollama-embed.yaml
+    hooks:
+      - events: ["postsync"]
+        command: "bash"
+        args: ["{{ env "REPO_ROOT" }}/helmfile/phase2/hooks/ollama-wait-models.sh", "ollama-embed", "nomic-embed-text"]
+
+  # ── OPAL — policy data sync Consul → OPA ─────────────────────────────────
+
+  - name: opal
+    namespace: infra
+    chart: permitio/opal
+    needs:
+      - infra/ollama-judge
+    values:
+      - values/opal.yaml
+    hooks:
+      - events: ["postsync"]
+        command: "bash"
+        args: ["{{ env "REPO_ROOT" }}/helmfile/phase2/hooks/opal-verify-sync.sh"]
+
+  # ── Intent-Aware Tool Catalog ─────────────────────────────────────────────
+
+  - name: tool-catalog
+    namespace: infra
+    chart: ./charts/tool-catalog
+    needs:
+      - infra/opal
+      - infra/ollama-judge
+    values:
+      - values/tool-catalog.yaml
+
+  # ── Security Gateway — Phase 2 upgrade ───────────────────────────────────
+
+  - name: security-gateway
+    namespace: infra
+    chart: ./charts/security-gateway
+    needs:
+      - infra/tool-catalog
+      - infra/ollama-embed
+    values:
+      - values/security-gateway.yaml
+    hooks:
+      - events: ["postsync"]
+        command: "bash"
+        args: ["{{ env "REPO_ROOT" }}/helmfile/phase2/hooks/biscuit-key-bootstrap.sh"]
+
+  # ── Injection Signal Index ────────────────────────────────────────────────
+
+  - name: injection-signals
+    namespace: infra
+    chart: ./charts/injection-signals
+    needs:
+      - infra/security-gateway
+    values:
+      - values/injection-signals.yaml
+    hooks:
+      - events: ["postsync"]
+        command: "bash"
+        args: ["{{ env "REPO_ROOT" }}/helmfile/phase2/hooks/build-injection-signals.sh"]
+
+  # ── CIBA ACP — Phase 2 upgrade (Duo Mobile push) ─────────────────────────
+
+  - name: ciba-acp
+    namespace: infra
+    chart: ./charts/ciba-acp
+    needs:
+      - infra/security-gateway
+    values:
+      - values/ciba-acp.yaml
+
+  # ── Tool Hash Verifier CronJob ────────────────────────────────────────────
+
+  - name: hash-verifier
+    namespace: infra
+    chart: ./charts/hash-verifier
+    needs:
+      - infra/opal
+    values:
+      - values/hash-verifier.yaml
+
+  # ── LiteLLM Proxy ─────────────────────────────────────────────────────────
+
+  - name: litellm
+    namespace: infra
+    chart: oci://ghcr.io/berriai/litellm-helm
+    values:
+      - values/litellm.yaml

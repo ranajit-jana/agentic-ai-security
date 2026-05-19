@@ -1,0 +1,7 @@
+schedule: "*/1 * * * *"
+
+env:
+  CONSUL_URL: "http://consul.infra.svc.cluster.local:8500"
+
+serviceAccount:
+  name: hash-verifier

@@ -1,0 +1,22 @@
+additionalDataSources:
+  - name: OpenSearch
+    type: grafana-opensearch-datasource
+    url: https://opensearch-cluster-master.observability.svc.cluster.local:9200
+    basicAuth: true
+    basicAuthUser: admin
+    jsonData:
+      tlsSkipVerify: true
+      version: "2.x"
+      timeField: "@timestamp"
+    secureJsonData:
+      basicAuthPassword: "${OPENSEARCH_ADMIN_PASSWORD}"
+
+dashboardProviders:
+  dashboardproviders.yaml:
+    apiVersion: 1
+    providers:
+      - name: posture
+        folder: Security Posture
+        type: file
+        options:
+          path: /var/lib/grafana/dashboards/posture

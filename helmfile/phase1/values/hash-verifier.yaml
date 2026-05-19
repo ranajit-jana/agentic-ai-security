@@ -1,0 +1,16 @@
+schedule: "*/1 * * * *"
+image:
+  repository: python
+  tag: "3.11-slim"
+  pullPolicy: IfNotPresent
+env:
+  CONSUL_URL: "http://consul.infra.svc.cluster.local:8500"
+serviceAccount:
+  name: hash-verifier
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi

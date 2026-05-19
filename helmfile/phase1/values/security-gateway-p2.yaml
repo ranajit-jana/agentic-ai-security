@@ -1,0 +1,15 @@
+env:
+  CEDAR_ENABLED: "true"
+  BISCUIT_ENABLED: "true"
+  LLM_GUARD_ENABLED: "true"
+  OLLAMA_EMBED_URL: "http://ollama-embed.infra.svc.cluster.local:11434"
+  INJECTION_SIGNALS_PATH: "/data/injection_signals.pkl"
+
+extraVolumeMounts:
+  - name: signal-data
+    mountPath: /data
+
+extraVolumes:
+  - name: signal-data
+    persistentVolumeClaim:
+      claimName: injection-signals-pvc

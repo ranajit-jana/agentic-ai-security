@@ -72,25 +72,28 @@ A production-grade security infrastructure for agentic AI systems, deployed on A
 .
 ├── scripts/
 │   ├── lib/common.sh            # Shared helper functions
-│   ├── 01_aws_infra.sh          # KMS · ECR · SNS · IAM roles
-│   ├── 02_eks_cluster.sh        # EKS cluster · node groups · EBS CSI
+│   ├── 01_aws_infra.sh          # KMS · ECR · SNS · IAM roles (run once)
+│   ├── 02_eks_cluster.sh        # EKS cluster · 4 node groups · EBS CSI
 │   ├── 03_kubeconfig.sh         # aws eks update-kubeconfig
 │   ├── 04_helmfile_deploy.sh    # Install helm/helmfile + deploy all releases
-│   ├── destroy.sh               # Tear down ALB → LBC → LBC IAM → EKS cluster (in order)
-│   └── validate_phase1.sh       # Automated Phase 1 checks (23 checks)
+│   ├── destroy.sh               # Tear down ALB → LBC → LBC IAM → EKS cluster
+│   └── validate.sh              # Automated checks — all Phase 1 + Phase 2 checks
 │
 ├── helmfile/
 │   └── phase1/
-│       ├── helmfile.yaml.gotmpl # All Phase 1 releases with ordering + hooks
-│       ├── values/              # Per-chart values
-│       ├── hooks/               # Post-deploy configuration scripts
-│       └── manifests/           # Raw K8s manifests
+│       ├── helmfile.yaml.gotmpl # All releases (Phase 1 + 2) with ordering + hooks
+│       ├── values/              # Per-chart values files
+│       ├── hooks/               # Post/pre-deploy configuration scripts
+│       └── manifests/           # Raw K8s manifests (PeerAuthentication, Ingress…)
 │
 ├── charts/
-│   ├── ciba-acp/                # Custom CIBA Authentication Channel Provider
-│   ├── keycloak/                # Keycloak + PostgreSQL
-│   ├── redis/                   # Redis for rate limiting
-│   ├── security-gateway/        # Custom agent gateway (FastAPI + Envoy)
+│   ├── ciba-acp/                # CIBA Authentication Channel Provider + Duo push
+│   ├── hash-verifier/           # Tool hash verifier CronJob
+│   ├── injection-signals/       # arc_pi_taxonomy embedding index builder
+│   ├── keycloak/                # Keycloak + PostgreSQL (no Bitnami)
+│   ├── redis/                   # Redis for rate limiting (no Bitnami)
+│   ├── security-gateway/        # Agent gateway (FastAPI + Envoy + Cedar + LLM Guard)
+│   ├── tool-catalog/            # Intent-aware tool catalog service
 │   └── agents/                  # Agent workload deployments
 │
 ├── policies/
@@ -98,8 +101,10 @@ A production-grade security infrastructure for agentic AI systems, deployed on A
 │       └── agentic.rego         # OPA baseline policy — permanent floor rules
 │
 ├── docs/
-│   └── vault.md                 # Vault operations guide
+│   ├── vault.md                 # Vault operations guide
+│   └── phase2.md                # Phase 2 component guide (what + why)
 │
+├── setup.txt                    # Operator runbook (deploy order, manual steps)
 ├── implementation.md            # Technology decision record
 ├── plan_phase1.md               # Phase 1 detailed plan
 ├── plan_phase2.md               # Phase 2 detailed plan
@@ -132,9 +137,9 @@ The following inline policies must be attached to the deploying IAM user in addi
 | `TerraformIAMAccess` | `iam:CreateRole`, `iam:DeleteRole`, `iam:AttachRolePolicy`, `iam:DetachRolePolicy`, `iam:CreatePolicy`, `iam:DeletePolicy`, `iam:GetRole`, `iam:PassRole` |
 | `OIDCProviderAccess` | `iam:CreateOpenIDConnectProvider`, `iam:GetOpenIDConnectProvider`, `iam:ListOpenIDConnectProviders`, `iam:TagOpenIDConnectProvider`, `iam:DeleteOpenIDConnectProvider` |
 
-### Phase 1 — Core Security Foundation
+### Deploy — Combined Phase 1 + Phase 2
 
-Phase 1 deploys: Istio · Istio Ingress Gateway · SPIRE · Consul · Vault · Keycloak · CIBA ACP · OPA · Redis · Security Gateway · OTel · Loki · Grafana · Agents
+Deploys everything in one run: Istio · SPIRE · Consul · Vault · Keycloak · OPA · Redis · Security Gateway · OTel · Loki · Grafana · Ollama (judge/policy/embed) · OPAL · Tool Catalog · Cedar/Biscuit/LLM Guard · Injection Signals · CIBA ACP + Duo · Hash Verifier · LiteLLM · Agents
 
 **First time only:**
 ```bash
@@ -145,25 +150,30 @@ aws sts get-caller-identity   # verify
 # Step 1 — AWS resources (KMS, ECR, SNS, IAM roles) — run ONCE, persists forever
 bash scripts/01_aws_infra.sh
 
-# Step 2 — EKS cluster + node groups (~15 min)
+# Step 2 — EKS cluster + 4 node groups (~15 min)
 bash scripts/02_eks_cluster.sh
 
 # Step 3 — Point kubectl at the new cluster
 bash scripts/03_kubeconfig.sh
 
-# Step 4 — Deploy all workloads + wire DNS (~20 min)
+# Step 3a — Store Duo credentials in Vault (required for CIBA push)
+#   kubectl port-forward svc/vault -n infra 8200:8200
+#   vault kv put secret/duo ikey=<> skey=<> host=<>
+#   (see setup.txt → DUO CREDENTIALS for full steps)
+
+# Step 4 — Deploy all workloads + wire DNS (~35 min; Ollama pulls ~4.7 GB first run)
 bash scripts/04_helmfile_deploy.sh
 
-# Step 5 — Validate (should be 34/34)
-bash scripts/validate_phase1.sh
+# Step 5 — Validate all checks
+bash scripts/validate.sh
 ```
 
 **Every subsequent rebuild (skip step 1):**
 ```bash
-bash scripts/02_eks_cluster.sh      # cluster + OIDC provider (fresh each time)
+bash scripts/02_eks_cluster.sh      # recreate cluster + OIDC provider
 bash scripts/03_kubeconfig.sh
 bash scripts/04_helmfile_deploy.sh  # deploys everything + wires Route 53 → ALB
-bash scripts/validate_phase1.sh     # should be 34/34
+bash scripts/validate.sh
 ```
 
 ### Vault Init — Required Human Step
@@ -233,11 +243,12 @@ bash scripts/destroy.sh
 # Removes: ALB → LBC → LBC IAM → EKS cluster + NAT gateway + VPC
 ```
 
-**Morning (~25 min):**
+**Morning (~35 min — Ollama model pull cached after first run):**
 ```bash
 bash scripts/02_eks_cluster.sh      # recreate cluster + register fresh OIDC provider
 bash scripts/03_kubeconfig.sh       # point kubectl at it
-bash scripts/04_helmfile_deploy.sh  # deploy everything + wire DNS automatically
+bash scripts/04_helmfile_deploy.sh  # deploy Phase 1 + Phase 2 + wire DNS automatically
+bash scripts/validate.sh
 ```
 
 > `01_aws_infra.sh` is **not needed** on subsequent rebuilds — KMS, ECR, SNS, and IAM roles persist.
@@ -248,7 +259,7 @@ bash scripts/04_helmfile_deploy.sh  # deploy everything + wire DNS automatically
 
 | Resource | Per month |
 |---|---|
-| EC2 nodes (5 nodes) | ~$210–270 |
+| EC2 nodes (8 nodes: 3×t3.medium + 2×t3.large + 1×t3.medium + 2×t3.xlarge) | ~$350–420 |
 | EKS control plane | ~$72 |
 | NAT Gateway | ~$33 |
 | ALB | ~$16 |
@@ -265,16 +276,39 @@ bash scripts/04_helmfile_deploy.sh  # deploy everything + wire DNS automatically
 
 ---
 
-### Phase 2 — Hardening *(coming next)*
+### Phase 2 — Now Merged Into Phase 1 Deployment
 
-Adds: Ollama (LLM judge + embeddings) · OPAL · Cedar dynamic policies · Biscuit keys · LLM Guard · Intent-Aware Tool Catalog · Duo Mobile CIBA push · Tool hash verifier
+Phase 2 releases are included in `helmfile/phase1/helmfile.yaml.gotmpl` and deploy automatically with `04_helmfile_deploy.sh`. No separate deploy step required.
 
+**Before first deploy, store Duo credentials in Vault** (Duo push won't work without them):
 ```bash
-bash scripts/phase2/00_prereqs_phase2.sh
-bash scripts/phase2/01_gpu_nodegroup.sh
-helmfile sync -f helmfile/phase2/helmfile.yaml.gotmpl
-bash scripts/validate_phase2.sh
+# Port-forward to Vault (after vault-init hook completes)
+kubectl port-forward svc/vault -n infra 8200:8200
+export VAULT_ADDR=http://127.0.0.1:8200
+vault login <root-token>
+vault kv put secret/duo ikey=<Integration-Key> skey=<Secret-Key> host=<API-Hostname>
 ```
+
+The `sync-duo-secret.sh` presync hook reads Vault automatically on every deploy and creates the `duo-credentials` Kubernetes secret. If Duo is not yet in Vault, ciba-acp starts with an empty secret (push disabled, no crash).
+
+**Phase 2 releases deployed automatically:**
+
+| Release | Chart | Purpose |
+|---|---|---|
+| `ollama-judge` | `ollama/ollama` | LLM Judge — validates tool call intent alignment |
+| `ollama-policy` | `ollama/ollama` | Policy LLM — Cedar policy generation and validation |
+| `ollama-embed` | `ollama/ollama` | Embedding model — semantic prompt injection detection |
+| `opal` | `permitio/opal` | Real-time policy sync: Consul → OPA |
+| `tool-catalog` | `./charts/tool-catalog` | Intent-aware tool filtering (replaces raw MCP tools/list) |
+| `security-gateway` | `./charts/security-gateway` | Upgraded with Cedar + Biscuit + LLM Guard |
+| `injection-signals` | `./charts/injection-signals` | Builds arc_pi_taxonomy embedding index for injection detection |
+| `ciba-acp` | `./charts/ciba-acp` | Upgraded with Duo Mobile push |
+| `hash-verifier` | `./charts/hash-verifier` | CronJob — verifies tool OCI digest + MCP hash every 60s |
+| `litellm` | OCI `ghcr.io/berriai/litellm-helm` | Unified model gateway — routes to Claude or local Ollama |
+
+> Ollama runs on the `inference` nodegroup (t3.xlarge, 16 GB RAM). `llama3.1:8b` requires ~6 GB RAM — CPU-only, no GPU needed.
+
+See [docs/phase2.md](docs/phase2.md) for a detailed explanation of each component.
 
 ### Phase 3 — Threat Management *(coming next)*
 
@@ -310,10 +344,10 @@ bash scripts/validate_phase3.sh
 
 | Group | Type | Count | Workloads |
 |---|---|---|---|
-| `system` | `t3.medium` | 2 | CoreDNS · Consul · SPIRE · Istio · Vault |
-| `application` | `t3.large` | 2–4 | Agents · Keycloak · OPA · Gateway |
+| `system` | `t3.medium` | 3 | CoreDNS · Consul · SPIRE · Istio · Vault · Keycloak · OPA · Gateway · OPAL · Tool Catalog |
+| `application` | `t3.large` | 2–4 | Agents · LiteLLM |
 | `observability` | `t3.medium` | 1–2 | OTel · Loki · Grafana |
-| `gpu` *(Phase 2)* | `g4dn.xlarge` | 1–2 | Ollama (LLM judge + embeddings) |
+| `inference` | `t3.xlarge` | 2–3 | Ollama judge · Ollama policy · Ollama embed (llama3.1:8b needs 6 GB) |
 
 ---
 
@@ -349,9 +383,9 @@ User taps approval link → Keycloak issues token → Agent polls → proceeds
 | Step | When | What |
 |---|---|---|
 | 1 | Before any script | `aws configure` |
-| 2 | Before Phase 1 deploy | Attach `OIDCProviderAccess` inline policy to `aws-dev` IAM user |
-| 3 | During Phase 1 deploy | Save Vault recovery keys + root token to password manager |
-| 4 | Before Phase 2 | Create Duo Security app, store creds in Vault |
+| 2 | Before first deploy | Attach `OIDCProviderAccess` inline policy to `aws-dev` IAM user |
+| 3 | During deploy | Save Vault recovery keys + root token to password manager |
+| 4 | Before or after deploy | Create Duo Security app, store creds in Vault (`secret/duo`) |
 | 5 | Before Phase 3 | Review KubeArmor discovery policies |
 
 ---
@@ -395,6 +429,7 @@ The AWS Load Balancer Controller (`aws-load-balancer-controller` in `kube-system
 ## References
 
 - [Vault operations guide](docs/vault.md)
+- [Phase 2 component guide](docs/phase2.md)
 - [Implementation decisions](implementation.md)
 - [Phase 1 plan](plan_phase1.md)
 - [Phase 2 plan](plan_phase2.md)

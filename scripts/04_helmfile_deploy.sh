@@ -62,22 +62,24 @@ fi
 # ── Add helm chart repositories ───────────────────────────────────────────────
 
 log "Adding/updating helm chart repositories..."
-helm repo add istio        https://istio-release.storage.googleapis.com/charts          2>/dev/null || true
-helm repo add spiffe       https://spiffe.github.io/helm-charts-hardened               2>/dev/null || true
-helm repo add hashicorp    https://helm.releases.hashicorp.com                          2>/dev/null || true
-helm repo add opa          https://open-policy-agent.github.io/kube-mgmt/charts        2>/dev/null || true
-helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts 2>/dev/null || true
-helm repo add grafana      https://grafana.github.io/helm-charts                        2>/dev/null || true
+helm repo add istio          https://istio-release.storage.googleapis.com/charts          2>/dev/null || true
+helm repo add spiffe         https://spiffe.github.io/helm-charts-hardened               2>/dev/null || true
+helm repo add hashicorp      https://helm.releases.hashicorp.com                          2>/dev/null || true
+helm repo add opa            https://open-policy-agent.github.io/kube-mgmt/charts        2>/dev/null || true
+helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts  2>/dev/null || true
+helm repo add grafana        https://grafana.github.io/helm-charts                        2>/dev/null || true
+helm repo add ollama         https://otwld.github.io/ollama-helm                          2>/dev/null || true
+helm repo add permitio       https://permitio.github.io/opal-helm-chart                   2>/dev/null || true
 helm repo update
 log "Helm repos ready"
 
 # ── Deploy via helmfile ───────────────────────────────────────────────────────
 
-log "Running helmfile sync (this will take 15-20 min)..."
+log "Running helmfile sync (this will take 20-30 min — Ollama pulls ~4.7 GB on first run)..."
 cd "${REPO_ROOT}"
 helmfile sync -f "${HELMFILE_PATH}"
 
-log "Phase 1 deployment complete"
+log "Deployment complete (Phase 1 + Phase 2)"
 
 # ── Wire Route 53 ALIAS records → ALB ────────────────────────────────────────
 
@@ -130,4 +132,4 @@ EOF
   log "Route 53 ALIAS records created for: ${SUBDOMAINS[*]} → ${ALB_HOSTNAME}"
 fi
 
-log "Run ./scripts/validate_phase1.sh to verify"
+log "Run ./scripts/validate.sh to verify"

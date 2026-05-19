@@ -1,0 +1,16 @@
+schedule: "0 6 * * *"
+
+nodeSelector:
+  role: system
+
+env:
+  CONSUL_URL: "http://consul-server.infra.svc.cluster.local:8500"
+  OPA_URL: "http://opa.infra.svc.cluster.local:8181"
+  OPENSEARCH_URL: "https://opensearch-cluster-master.observability.svc.cluster.local:9200"
+
+envFrom:
+  - secretRef:
+      name: opensearch-credentials
+
+serviceAccount:
+  name: gap-analysis

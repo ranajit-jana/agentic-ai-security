@@ -1,0 +1,9 @@
+image:
+  tag: phase2
+
+env:
+  DUO_ENABLED: "true"
+
+envFrom:
+  - secretRef:
+      name: duo-credentials

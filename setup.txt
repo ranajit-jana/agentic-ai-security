@@ -1,5 +1,5 @@
 ========================================================
-  AGENTIC AI SECURITY — PHASE 1 SETUP GUIDE
+  AGENTIC AI SECURITY — SETUP GUIDE (PHASE 1 + 2)
 ========================================================
 
 ── PREREQUISITES ────────────────────────────────────────
@@ -18,13 +18,22 @@ Configure AWS:
 ── DEPLOY ORDER ─────────────────────────────────────────
 Run these scripts in order:
 
-  Step 1:  bash scripts/01_aws_infra.sh
+  Step 1:  bash scripts/01_aws_infra.sh        (once ever)
   Step 2:  bash scripts/02_eks_cluster.sh
   Step 3:  bash scripts/03_kubeconfig.sh
+  Step 3a: Store Duo credentials in Vault       (see DUO section)
   Step 4:  bash scripts/04_helmfile_deploy.sh
+  Step 5:  bash scripts/validate.sh
 
-Step 4 will pause at the Vault hook and require a manual
-step (see VAULT INIT section below).
+Step 4 deploys ALL Phase 1 + Phase 2 releases in one run.
+It will pause at the Vault hook — see VAULT INIT below.
+First run takes ~35 min (Ollama pulls llama3.1:8b, ~4.7 GB).
+
+On every subsequent rebuild (Step 1 not needed):
+  bash scripts/02_eks_cluster.sh
+  bash scripts/03_kubeconfig.sh
+  bash scripts/04_helmfile_deploy.sh
+  bash scripts/validate.sh
 
 ── WHAT EACH SCRIPT DOES ────────────────────────────────
 
@@ -32,19 +41,21 @@ step (see VAULT INIT section below).
   - KMS key (alias/vault-unseal) for Vault auto-unseal
   - ECR repos for all agent and gateway images
   - SNS topics: ciba-approvals, security-alerts
-  - IAM roles: vault-unseal-role, ciba-acp-role, ecr-puller-role
+  - IAM roles: vault-unseal-role, ciba-acp-role, ecr-puller-role,
+               hash-verifier-role (SNS publish to security-alerts)
 
 02_eks_cluster.sh
   - EKS cluster "agentic-security" (Kubernetes 1.35)
-  - 3 nodegroups:
-      system       t3.medium  3 nodes  role=system       (all infra)
-      application  t3.large   2 nodes  role=application  (agents)
-      observability t3.medium 1 node   role=observability (monitoring)
+  - 4 nodegroups:
+      system        t3.medium  3 nodes  role=system       (all infra)
+      application   t3.large   2 nodes  role=application  (agents)
+      observability t3.medium  1 node   role=observability (monitoring)
+      inference     t3.xlarge  2 nodes  role=inference    (Ollama LLMs)
   - Installs helm v3.21.0 to ~/.local/bin
   - Attaches AmazonEBSCSIDriverPolicy to node roles
   - Installs aws-ebs-csi-driver via Helm
   - Creates gp2-csi StorageClass (EBS CSI, set as default)
-  - Binds EKS Pod Identity for vault and ciba-acp
+  - Binds EKS Pod Identity for vault, ciba-acp, hash-verifier
 
 03_kubeconfig.sh
   - Configures kubectl to point at the cluster
@@ -52,8 +63,15 @@ step (see VAULT INIT section below).
 
 04_helmfile_deploy.sh
   - Installs helm, helm-diff plugin, helmfile if missing
-  - Adds all Helm chart repositories
-  - Runs: helmfile sync (deploys all Phase 1 releases)
+  - Adds all Helm chart repositories (incl. ollama, permitio)
+  - Runs: helmfile sync — deploys all Phase 1 + Phase 2 releases
+  - Phase 1: Istio, SPIRE, Consul, Vault, Keycloak, OPA, Redis,
+             Security Gateway, OTel, Loki, Grafana, Agents
+  - Phase 2: Ollama (judge/policy/embed), OPAL, Tool Catalog,
+             Security Gateway (Cedar+Biscuit+LLM Guard upgrades),
+             Injection Signals, CIBA ACP (Duo), Hash Verifier, LiteLLM
+  - Auto-creates user rana with analyst role in Keycloak
+  - Wires Route 53 ALIAS records to ALB on completion
 
 ── VAULT INIT (manual step required) ───────────────────
 Vault cannot self-initialise. The hook in 04_helmfile_deploy.sh
@@ -87,6 +105,50 @@ If the hook fails and you need to run it manually:
   5. Continue helmfile:
        bash scripts/04_helmfile_deploy.sh
 
+── VAULT ROOT TOKEN RECOVERY ────────────────────────────
+If the root token is lost or revoked, generate a new one
+using 3 of the 5 recovery keys:
+
+  1. Shell into vault pod:
+       kubectl exec -it -n infra vault-0 -- /bin/sh
+       export VAULT_ADDR=http://127.0.0.1:8200
+
+  2. Start root token generation (note the OTP printed):
+       vault operator generate-root -init
+
+  3. Provide 3 recovery keys one at a time:
+       vault operator generate-root   # enter key 1
+       vault operator generate-root   # enter key 2
+       vault operator generate-root   # enter key 3 → prints Encoded Token
+
+  4. Decode the encoded token:
+       vault operator generate-root -decode <Encoded-Token> -otp <OTP>
+
+  5. Log in with the new root token:
+       vault login <new-root-token>
+
+  Recovery keys are stored in: ~/vault-init-keys-<date>.txt
+  (never commit this file to git)
+
+── VAULT KV ENGINE ──────────────────────────────────────
+The kv-v2 secrets engine at path secret/ must be enabled
+before any kv put/get commands will work.
+
+  Check if already enabled:
+    vault secrets list
+
+  Enable if secret/ is not listed:
+    vault secrets enable -path=secret kv-v2
+
+  Store Duo credentials (after enabling):
+    vault kv put secret/duo \
+      ikey=<Integration-Key> \
+      skey=<Secret-Key> \
+      host=<API-Hostname>
+
+  Verify:
+    vault kv get secret/duo
+
 ── CONSUL ACL TOKEN ─────────────────────────────────────
 Consul runs with ACLs enabled. The bootstrap token is
 automatically stored in a Kubernetes secret.
@@ -104,22 +166,92 @@ automatically stored in a Kubernetes secret.
 ── VALIDATE ─────────────────────────────────────────────
 After all releases are deployed and vault is initialised:
 
-  bash scripts/validate_phase1.sh
+  bash scripts/validate.sh
 
 ── NODEGROUPS ───────────────────────────────────────────
   system        t3.medium  3 nodes (min 3, max 4)  role=system
   application   t3.large   2 nodes (min 2, max 4)  role=application
   observability t3.medium  1 node  (min 1, max 2)  role=observability
+  inference     t3.xlarge  2 nodes (min 2, max 3)  role=inference
 
   Workload placement:
     system:        istiod, spire, consul, vault, keycloak,
-                   opa, redis, security-gateway, ciba-acp
+                   opa, redis, security-gateway, ciba-acp,
+                   tool-catalog, opal, litellm
     application:   all AI agents
     observability: otel-collector, loki, grafana
+    inference:     ollama-judge, ollama-policy, ollama-embed
+                   (t3.xlarge needed — llama3.1:8b uses ~6 GB RAM)
 
   Scale system nodegroup if pods are evicted/OOMKilled:
     eksctl scale nodegroup --cluster agentic-security \
       --region ap-south-1 --name system --nodes 4
+
+── KEYCLOAK USER MANAGEMENT ─────────────────────────────
+Keycloak admin secret name: keycloak-admin (fields: username, password)
+Admin password is set literally in helmfile/phase1/values/keycloak.yaml
+Realm for all users: firm-internal
+Roles available: analyst, admin, viewer
+
+  Port-forward first (required — ClusterIP not reachable from laptop):
+    kubectl port-forward svc/keycloak -n infra 8080:80
+
+  In a new terminal, get admin token:
+    KEYCLOAK_URL="http://localhost:8080"
+    ADMIN_PASS="changeme-set-via-vault"
+
+    TOKEN=$(curl -sf -X POST \
+      "$KEYCLOAK_URL/realms/master/protocol/openid-connect/token" \
+      -d "client_id=admin-cli&username=admin&password=$ADMIN_PASS&grant_type=password" \
+      | jq -r '.access_token')
+
+  Create a user and assign a role (example: rana / analyst):
+    curl -sf -X POST "$KEYCLOAK_URL/admin/realms/firm-internal/users" \
+      -H "Authorization: Bearer $TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{"username":"<username>","enabled":true,
+           "credentials":[{"type":"password","value":"<password>","temporary":false}]}'
+
+    USER_ID=$(curl -sf "$KEYCLOAK_URL/admin/realms/firm-internal/users?username=<username>" \
+      -H "Authorization: Bearer $TOKEN" | jq -r '.[0].id')
+
+    ROLE_ID=$(curl -sf "$KEYCLOAK_URL/admin/realms/firm-internal/roles/<role>" \
+      -H "Authorization: Bearer $TOKEN" | jq -r '.id')
+
+    curl -sf -X POST \
+      "$KEYCLOAK_URL/admin/realms/firm-internal/users/$USER_ID/role-mappings/realm" \
+      -H "Authorization: Bearer $TOKEN" \
+      -H "Content-Type: application/json" \
+      -d "[{\"id\":\"$ROLE_ID\",\"name\":\"<role>\"}]"
+
+  Note: CIBA approval notifications go to the analyst who triggered the
+  workflow — not role-based. Each analyst must also be enrolled in Duo
+  (see duo.md) for push notifications to work.
+
+── DUO CREDENTIALS ──────────────────────────────────────
+The CIBA ACP needs Duo credentials to send push notifications.
+Store them in Vault BEFORE running 04_helmfile_deploy.sh.
+If not stored, ciba-acp will start without Duo (push disabled).
+
+  1. Create a Duo Auth API application at admin.duosecurity.com
+     Application type: Auth API
+     Save: Integration Key (ikey), Secret Key (skey), API Hostname (host)
+
+  2. Port-forward to vault and store credentials:
+       kubectl port-forward svc/vault -n infra 8200:8200
+       export VAULT_ADDR=http://127.0.0.1:8200
+       vault login <root-token>
+       vault kv put secret/duo \
+         ikey=<Integration-Key> \
+         skey=<Secret-Key> \
+         host=<API-Hostname>   # e.g. api-XXXXXXXX.duosecurity.com
+
+  3. The sync-duo-secret.sh presync hook reads this automatically
+     on every helmfile deploy and creates the duo-credentials k8s secret.
+
+  4. Enroll each analyst user in Duo Mobile:
+     User must set up Duo Mobile on their phone. The CIBA push goes
+     to the analyst who initiates the workflow (not role-based broadcast).
 
 ── DESTROY (stop billing) ───────────────────────────────
   bash scripts/destroy.sh

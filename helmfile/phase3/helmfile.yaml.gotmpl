@@ -1,0 +1,118 @@
+repositories:
+  - name: kubearmor
+    url: https://helm.kubearmor.io
+  - name: opensearch
+    url: https://opensearch-project.github.io/helm-charts
+  - name: fluent
+    url: https://fluent.github.io/helm-charts
+
+helmDefaults:
+  wait: true
+  timeout: 600
+  createNamespace: true
+
+releases:
+
+  # ── KubeArmor ─────────────────────────────────────────────────────────────
+  # Runtime security enforcement — blocks syscall violations, not just alerts.
+  # SPIFFE-aware: scopes policies to SPIRE SVIDs.
+
+  - name: kubearmor
+    namespace: kubearmor-system
+    chart: kubearmor/kubearmor
+    values:
+      - values/kubearmor.yaml
+
+  - name: kubearmor-operator
+    namespace: kubearmor-system
+    chart: kubearmor/kubearmor-operator
+    needs:
+      - kubearmor-system/kubearmor
+    values:
+      - values/kubearmor-operator.yaml
+    hooks:
+      - events: ["postsync"]
+        command: "bash"
+        args: ["{{ env "REPO_ROOT" }}/helmfile/phase3/hooks/kubearmor-apply-baseline.sh"]
+
+  # ── KubeArmor OPAL Controller ─────────────────────────────────────────────
+  # Watches OPA for anomaly events. On anomaly: tightens the offending agent's
+  # KubeArmor CRD policy in real time. Closes the OPAL → OPA → KubeArmor loop.
+
+  - name: kubearmor-controller
+    namespace: kubearmor-system
+    chart: {{ env "REPO_ROOT" }}/charts/kubearmor-controller
+    needs:
+      - kubearmor-system/kubearmor-operator
+    values:
+      - values/kubearmor-controller.yaml
+
+  # ── OpenSearch + Security Analytics ──────────────────────────────────────
+  # SIEM for cross-source correlation:
+  #   - KubeArmor runtime blocks (via Fluent Bit)
+  #   - GuardDuty findings (via CloudWatch → OTel)
+  #   - Injection + tool call correlation (injection → tool call within 60s)
+  # 30Gi per node — sized for one day's events (wiped on nightly destroy).
+  # ISM policy auto-deletes indices older than 1 day.
+
+  - name: opensearch
+    namespace: observability
+    chart: opensearch/opensearch
+    needs:
+      - kubearmor-system/kubearmor-operator
+    values:
+      - values/opensearch.yaml
+    hooks:
+      - events: ["postsync"]
+        command: "bash"
+        args: ["{{ env "REPO_ROOT" }}/helmfile/phase3/hooks/opensearch-load-rules.sh"]
+
+  - name: opensearch-dashboards
+    namespace: observability
+    chart: opensearch/opensearch-dashboards
+    needs:
+      - observability/opensearch
+    values:
+      - values/opensearch-dashboards.yaml
+
+  # ── Fluent Bit — KubeArmor log shipping ───────────────────────────────────
+  # DaemonSet that reads from KubeArmor relay (gRPC :32767) and ships to:
+  #   - OpenSearch index kubearmor-* (for correlation rules)
+  #   - Loki (for Grafana KubeArmor Runtime dashboard)
+
+  - name: fluent-bit-kubearmor
+    namespace: observability
+    chart: fluent/fluent-bit
+    needs:
+      - observability/opensearch
+      - kubearmor-system/kubearmor-operator
+    values:
+      - values/fluent-bit-kubearmor.yaml
+
+  # ── Policy Coverage Gap Analysis CronJob ─────────────────────────────────
+  # Runs daily at 06:00. Compares tools/agents in Consul vs OPA/Cedar coverage.
+  # Publishes gap report to OpenSearch and SNS.
+
+  - name: gap-analysis
+    namespace: infra
+    chart: {{ env "REPO_ROOT" }}/charts/gap-analysis
+    needs:
+      - observability/opensearch
+    values:
+      - values/gap-analysis.yaml
+
+  # ── Posture Dashboard (Grafana upgrade) ───────────────────────────────────
+  # Adds OpenSearch datasource + provisions the Security Posture dashboard.
+  # Same release name as Phase 1 — Helmfile issues helm upgrade.
+
+  - name: grafana
+    namespace: observability
+    chart: grafana/grafana
+    needs:
+      - observability/opensearch
+    values:
+      - values/grafana.yaml
+    hooks:
+      - events: ["postsync"]
+        command: "bash"
+        args: ["{{ env "REPO_ROOT" }}/helmfile/phase3/hooks/grafana-provision-dashboard.sh"]

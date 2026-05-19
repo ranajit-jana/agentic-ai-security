@@ -84,6 +84,16 @@ managedNodeGroups:
     desiredCapacity: 1
     labels: {role: observability}
     privateNetworking: true
+  - name: inference
+    instanceType: t3.xlarge
+    minSize: 2
+    maxSize: 3
+    desiredCapacity: 2
+    labels: {role: inference}
+    privateNetworking: true
+    tags:
+      k8s.io/cluster-autoscaler/enabled: "true"
+      k8s.io/cluster-autoscaler/${CLUSTER_NAME}: "owned"
 EOF
   log "Cluster created"
 fi
@@ -153,7 +163,7 @@ bind_pod_identity() {
       --cluster-name "$CLUSTER_NAME" \
       --namespace "$namespace" \
       --service-account "$sa" \
-      --query 'associations[0].associationId' --output text 2>/dev/null | grep -q "^pa-"; then
+      --query 'associations[0].associationId' --output text 2>/dev/null | grep -qv "^None$"; then
     log "Pod identity already bound: $namespace/$sa"
   else
     aws eks create-pod-identity-association \
@@ -165,8 +175,10 @@ bind_pod_identity() {
   fi
 }
 
-bind_pod_identity infra vault    vault-unseal-role
-bind_pod_identity infra ciba-acp ciba-acp-role
+bind_pod_identity infra      vault                    vault-unseal-role
+bind_pod_identity infra      ciba-acp                 ciba-acp-role
+bind_pod_identity infra      hash-verifier            hash-verifier-role
+bind_pod_identity kube-system aws-load-balancer-controller aws-load-balancer-controller-role
 
 # ── IAM OIDC provider ─────────────────────────────────────────────────────────
 # Required for AWS Load Balancer Controller to assume its IAM role via IRSA.
@@ -178,5 +190,24 @@ eksctl utils associate-iam-oidc-provider \
   --region "$REGION" \
   --approve
 log "OIDC provider registered"
+
+# ── AWS Load Balancer Controller ──────────────────────────────────────────────
+
+log "Installing AWS Load Balancer Controller..."
+helm repo add eks https://aws.github.io/eks-charts 2>/dev/null || true
+helm repo update eks
+
+if helm status aws-load-balancer-controller -n kube-system &>/dev/null; then
+  log "AWS Load Balancer Controller already installed"
+else
+  helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
+    --namespace kube-system \
+    --set clusterName="${CLUSTER_NAME}" \
+    --set serviceAccount.create=true \
+    --set serviceAccount.name=aws-load-balancer-controller \
+    --set region="${REGION}" \
+    --wait --timeout 180s
+  log "AWS Load Balancer Controller installed"
+fi
 
 log "EKS cluster ready"
