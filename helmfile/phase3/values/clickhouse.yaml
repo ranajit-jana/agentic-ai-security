@@ -1,0 +1,23 @@
+# Single node — lab/nightly-destroy setup.
+# For production use replicaCount: 3 with ReplicatedMergeTree.
+# OpenSearch replaced by ClickHouse — see docs/observability.md.
+
+replicaCount: 1
+
+persistence:
+  size: 30Gi
+
+resources:
+  requests:
+    cpu: 1000m
+    memory: 4Gi
+  limits:
+    cpu: 2000m
+    memory: 6Gi
+
+nodeSelector:
+  role: system
+
+clickhouse:
+  # Schema and TTL created by clickhouse-init-schema.sh postsync hook
+  defaultDatabase: security

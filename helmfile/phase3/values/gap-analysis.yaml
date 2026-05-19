@@ -6,11 +6,9 @@ nodeSelector:
 env:
   CONSUL_URL: "http://consul-server.infra.svc.cluster.local:8500"
   OPA_URL: "http://opa.infra.svc.cluster.local:8181"
-  OPENSEARCH_URL: "https://opensearch-cluster-master.observability.svc.cluster.local:9200"
-
-envFrom:
-  - secretRef:
-      name: opensearch-credentials
+  CLICKHOUSE_URL: "http://clickhouse.observability.svc.cluster.local:8123"
+  # OPENSEARCH_URL removed — gap analysis now writes to ClickHouse.
+  # ClickHouse table: gap_analysis (TTL 7 days, queried by Grafana posture dashboard)
 
 serviceAccount:
   name: gap-analysis

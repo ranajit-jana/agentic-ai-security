@@ -19,18 +19,7 @@ config:
         Record cluster agentic-security
 
   outputs: |
-    [OUTPUT]
-        Name            opensearch
-        Match           kubearmor.*
-        Host            opensearch-cluster-master.observability.svc.cluster.local
-        Port            9200
-        Index           kubearmor
-        HTTP_User       admin
-        HTTP_Passwd     ${OPENSEARCH_ADMIN_PASSWORD}
-        tls             On
-        tls.verify      Off
-        Suppress_Type_Name On
-
+    # Ship to Loki for Grafana KubeArmor Runtime dashboard
     [OUTPUT]
         Name            loki
         Match           kubearmor.*
@@ -39,10 +28,15 @@ config:
         Labels          job=kubearmor, source=kubearmor
         Line_Format     json
 
-envFrom:
-  - secretRef:
-      name: opensearch-credentials
+    # Ship to Kafka for Flink CEP correlation
+    # OpenSearch output removed — correlation handled by Flink + ClickHouse.
+    # See docs/observability.md "OpenSearch Decision Record" for reasoning.
+    [OUTPUT]
+        Name        kafka
+        Match       kubearmor.*
+        Brokers     kafka.observability.svc.cluster.local:9092
+        Topics      kubearmor-events
+        rdkafka.log.connection.close  false
 
-nodeSelector: {}
 tolerations:
   - operator: Exists

@@ -1,0 +1,15 @@
+replicaCount: 1
+
+nodeSelector:
+  role: system
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+webhook:
+  create: true

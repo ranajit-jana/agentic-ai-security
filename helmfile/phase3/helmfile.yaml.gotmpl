@@ -1,10 +1,12 @@
 repositories:
   - name: kubearmor
     url: https://helm.kubearmor.io
-  - name: opensearch
-    url: https://opensearch-project.github.io/helm-charts
   - name: fluent
     url: https://fluent.github.io/helm-charts
+  - name: kafka
+    url: https://charts.bitnami.com/bitnami
+  # opensearch repo removed — see docs/observability.md "OpenSearch Decision Record"
+  # replaced by: Apache Flink (CEP correlation) + ClickHouse (analytics store)
 
 helmDefaults:
   wait: true
@@ -47,69 +49,119 @@ releases:
     values:
       - values/kubearmor-controller.yaml
 
-  # ── OpenSearch + Security Analytics ──────────────────────────────────────
-  # SIEM for cross-source correlation:
-  #   - KubeArmor runtime blocks (via Fluent Bit)
-  #   - GuardDuty findings (via CloudWatch → OTel)
-  #   - Injection + tool call correlation (injection → tool call within 60s)
-  # 30Gi per node — sized for one day's events (wiped on nightly destroy).
-  # ISM policy auto-deletes indices older than 1 day.
+  # ── OpenSearch — REMOVED ──────────────────────────────────────────────────
+  # Originally planned as SIEM for cross-source correlation.
+  # Removed because:
+  #   1. Flink CEP covers all correlation rules better (event-time, ordered
+  #      patterns, stateful interval joins — none of which OpenSearch supports)
+  #   2. ClickHouse replaces analytics at 50x the query speed
+  #   3. OpenSearch added ~$82/month EC2 cost for 3 dedicated nodes
+  #   4. Flink + ClickHouse fits on existing system nodegroup — $9/month EBS only
+  #   5. OpenSearch Dashboards replaced by Grafana + ClickHouse datasource
+  #
+  # When you WOULD use OpenSearch instead:
+  #   - Compliance auditors require a certified SIEM product (SOC2/ISO27001
+  #     evidence trail that names a recognised SIEM — OpenSearch/Splunk/QRadar)
+  #   - You want pre-built Sigma detection rules without writing Flink CEP jobs
+  #   - Security team prefers the OpenSearch Dashboards SIEM UI over Grafana
+  #
+  # Architecture decision captured in: docs/observability.md
+  # ─────────────────────────────────────────────────────────────────────────
 
-  - name: opensearch
+  # ── Kafka — event bus for Flink ───────────────────────────────────────────
+  # Durable buffer between event sources and Flink.
+  # Flink reads from Kafka offsets — restarts cleanly after nightly destroy.
+  # Topics: security-gateway-events, opa-decisions,
+  #         kubearmor-events, guardduty-events
+
+  - name: kafka
     namespace: observability
-    chart: opensearch/opensearch
+    chart: oci://registry-1.docker.io/bitnamicharts/kafka
     needs:
       - kubearmor-system/kubearmor-operator
     values:
-      - values/opensearch.yaml
-    hooks:
-      - events: ["postsync"]
-        command: "bash"
-        args: ["{{ env "REPO_ROOT" }}/helmfile/phase3/hooks/opensearch-load-rules.sh"]
-
-  - name: opensearch-dashboards
-    namespace: observability
-    chart: opensearch/opensearch-dashboards
-    needs:
-      - observability/opensearch
-    values:
-      - values/opensearch-dashboards.yaml
+      - values/kafka.yaml
 
   # ── Fluent Bit — KubeArmor log shipping ───────────────────────────────────
   # DaemonSet that reads from KubeArmor relay (gRPC :32767) and ships to:
-  #   - OpenSearch index kubearmor-* (for correlation rules)
-  #   - Loki (for Grafana KubeArmor Runtime dashboard)
+  #   - Loki  (KubeArmor Runtime dashboard in Grafana)
+  #   - Kafka topic kubearmor-events  (for Flink CEP correlation)
+  # OpenSearch output removed along with OpenSearch release.
 
   - name: fluent-bit-kubearmor
     namespace: observability
     chart: fluent/fluent-bit
     needs:
-      - observability/opensearch
+      - observability/kafka
       - kubearmor-system/kubearmor-operator
     values:
       - values/fluent-bit-kubearmor.yaml
 
+  # ── Apache Flink — CEP correlation engine ────────────────────────────────
+  # Replaces OpenSearch Security Analytics for all correlation rules.
+  # Advantages over OpenSearch:
+  #   - Event-time processing with watermarks (handles late-arriving events)
+  #   - FlinkCEP: ordered patterns (A then B then C), absence detection
+  #   - Stateful interval joins across independent streams
+  #   - Stateless between restarts — reads from Kafka offsets, no PVC needed
+  # CEP rules: injection→toolcall (60s), probe→inject→exfiltrate (2min),
+  #            KubeArmor block ⋈ GuardDuty same node (5min interval join),
+  #            Biscuit violations > 3 in 10min
+
+  - name: flink-operator
+    namespace: observability
+    chart: oci://registry-1.docker.io/apache/flink-kubernetes-operator
+    needs:
+      - observability/kafka
+    values:
+      - values/flink-operator.yaml
+    hooks:
+      - events: ["postsync"]
+        command: "bash"
+        args: ["{{ env "REPO_ROOT" }}/helmfile/phase3/hooks/flink-deploy-job.sh"]
+
+  # ── ClickHouse — analytics store ──────────────────────────────────────────
+  # Replaces OpenSearch as the analytics backend for Grafana dashboards.
+  # Advantages over OpenSearch:
+  #   - 50x faster aggregation queries (column-oriented storage)
+  #   - LowCardinality encoding for fields like decision=allow/deny
+  #   - TTL per table — auto-deletes rows older than 1 day (no ISM policy needed)
+  #   - Single node fits on existing system nodegroup (30Gi EBS)
+  #   - Grafana has official ClickHouse datasource plugin
+
+  - name: clickhouse
+    namespace: observability
+    chart: oci://registry-1.docker.io/clickhouse/clickhouse
+    needs:
+      - observability/flink-operator
+    values:
+      - values/clickhouse.yaml
+    hooks:
+      - events: ["postsync"]
+        command: "bash"
+        args: ["{{ env "REPO_ROOT" }}/helmfile/phase3/hooks/clickhouse-init-schema.sh"]
+
   # ── Policy Coverage Gap Analysis CronJob ─────────────────────────────────
   # Runs daily at 06:00. Compares tools/agents in Consul vs OPA/Cedar coverage.
-  # Publishes gap report to OpenSearch and SNS.
+  # Publishes gap report to ClickHouse (was OpenSearch) and SNS.
 
   - name: gap-analysis
     namespace: infra
     chart: {{ env "REPO_ROOT" }}/charts/gap-analysis
     needs:
-      - observability/opensearch
+      - observability/clickhouse
     values:
       - values/gap-analysis.yaml
 
   # ── Posture Dashboard (Grafana upgrade) ───────────────────────────────────
-  # Adds OpenSearch datasource + provisions the Security Posture dashboard.
+  # Adds ClickHouse datasource (replaces OpenSearch) + provisions posture dashboard.
   # Same release name as Phase 1 — Helmfile issues helm upgrade.
 
   - name: grafana
     namespace: observability
     chart: grafana/grafana
     needs:
-      - observability/opensearch
+      - observability/clickhouse
     values:
       - values/grafana.yaml
     hooks:

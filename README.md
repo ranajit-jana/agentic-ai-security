@@ -428,6 +428,8 @@ The AWS Load Balancer Controller (`aws-load-balancer-controller` in `kube-system
 
 ## References
 
+- [Final architecture — all phases](docs/phase3.md)
+- [Observability & correlation options](docs/observability.md)
 - [Vault operations guide](docs/vault.md)
 - [Phase 2 component guide](docs/phase2.md)
 - [Implementation decisions](implementation.md)

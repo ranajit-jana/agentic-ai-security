@@ -1,0 +1,37 @@
+replicaCount: 3
+
+persistence:
+  size: 20Gi
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 2Gi
+  limits:
+    cpu: 1000m
+    memory: 3Gi
+
+nodeSelector:
+  role: system
+
+# 1-day retention — data is re-generated on every rebuild
+config:
+  log.retention.hours: 24
+  log.retention.bytes: 10737418240   # 10 GB per partition cap
+
+# Topics created automatically on first produce
+provisioning:
+  enabled: true
+  topics:
+    - name: security-gateway-events
+      partitions: 3
+      replicationFactor: 3
+    - name: opa-decisions
+      partitions: 3
+      replicationFactor: 3
+    - name: kubearmor-events
+      partitions: 3
+      replicationFactor: 3
+    - name: guardduty-events
+      partitions: 3
+      replicationFactor: 3

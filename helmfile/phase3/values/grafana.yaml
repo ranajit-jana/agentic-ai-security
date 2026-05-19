@@ -1,15 +1,16 @@
+# ClickHouse datasource replaces OpenSearch.
+# OpenSearch removed — see docs/observability.md "OpenSearch Decision Record".
+# ClickHouse is 50x faster for aggregation queries and fits on existing nodes.
+
 additionalDataSources:
-  - name: OpenSearch
-    type: grafana-opensearch-datasource
-    url: https://opensearch-cluster-master.observability.svc.cluster.local:9200
-    basicAuth: true
-    basicAuthUser: admin
+  - name: ClickHouse
+    type: grafana-clickhouse-datasource
+    url: http://clickhouse.observability.svc.cluster.local:8123
     jsonData:
-      tlsSkipVerify: true
-      version: "2.x"
-      timeField: "@timestamp"
+      defaultDatabase: security
+      username: default
     secureJsonData:
-      basicAuthPassword: "${OPENSEARCH_ADMIN_PASSWORD}"
+      password: "${CLICKHOUSE_PASSWORD}"
 
 dashboardProviders:
   dashboardproviders.yaml:
