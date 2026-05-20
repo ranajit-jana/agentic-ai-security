@@ -1,0 +1,89 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: litellm-config
+  namespace: {{ .Release.Namespace }}
+data:
+  config.yaml: |
+    model_list:
+    {{- range .Values.modelList }}
+      - model_name: {{ .model_name }}
+        litellm_params:
+          model: {{ .litellm_params.model }}
+          {{- if .litellm_params.api_key }}
+          api_key: {{ .litellm_params.api_key }}
+          {{- end }}
+          {{- if .litellm_params.api_base }}
+          api_base: {{ .litellm_params.api_base }}
+          {{- end }}
+    {{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: litellm
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: litellm
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: litellm
+  template:
+    metadata:
+      labels:
+        app: litellm
+    spec:
+      containers:
+        - name: litellm
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["--config", "/app/config.yaml", "--port", "4000"]
+          ports:
+            - containerPort: 4000
+          env:
+            - name: STORE_MODEL_IN_DB
+              value: {{ .Values.env.STORE_MODEL_IN_DB | quote }}
+            - name: LITELLM_MASTER_KEY
+              value: {{ .Values.masterKey | quote }}
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: anthropic-api-key
+                  key: api_key
+                  optional: true
+          volumeMounts:
+            - name: config
+              mountPath: /app/config.yaml
+              subPath: config.yaml
+          readinessProbe:
+            httpGet:
+              path: /health/readiness
+              port: 4000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+      volumes:
+        - name: config
+          configMap:
+            name: litellm-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: litellm
+  namespace: {{ .Release.Namespace }}
+spec:
+  selector:
+    app: litellm
+  ports:
+    - port: 4000
+      targetPort: 4000

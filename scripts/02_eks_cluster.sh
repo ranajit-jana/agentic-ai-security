@@ -88,17 +88,13 @@ managedNodeGroups:
     labels: {role: observability}
     privateNetworking: true
   - name: inference
-    instanceTypes: [g4dn.xlarge, g4dn.2xlarge]
+    instanceTypes: [m5.xlarge, m5a.xlarge, m5.2xlarge]
     spot: true
     minSize: 1
     maxSize: 2
     desiredCapacity: 1
     labels: {role: inference}
     privateNetworking: true
-    taints:
-      - key: nvidia.com/gpu
-        value: "true"
-        effect: NoSchedule
     tags:
       k8s.io/cluster-autoscaler/enabled: "true"
       k8s.io/cluster-autoscaler/${CLUSTER_NAME}: "owned"
@@ -227,5 +223,145 @@ log "Installing NVIDIA device plugin..."
 kubectl apply -f \
   https://raw.githubusercontent.com/NVIDIA/k8s-device-plugin/v0.14.5/nvidia-device-plugin.yml
 log "NVIDIA device plugin installed"
+
+# ── EFS for Ollama model cache ────────────────────────────────────────────────
+# All three Ollama pods share one EFS volume so llama3.1:8b is downloaded once
+# and persists across pod restarts/node replacements and instance-type changes.
+
+VPC_ID=$(aws eks describe-cluster --name "$CLUSTER_NAME" \
+  --query 'cluster.resourcesVpcConfig.vpcId' --output text)
+VPC_CIDR=$(aws ec2 describe-vpcs --vpc-ids "$VPC_ID" \
+  --query 'Vpcs[0].CidrBlock' --output text)
+PRIVATE_SUBNETS=$(aws ec2 describe-subnets \
+  --filters "Name=vpc-id,Values=${VPC_ID}" \
+    "Name=tag:kubernetes.io/role/internal-elb,Values=1" \
+  --query 'Subnets[].SubnetId' --output text)
+
+log "Creating EFS security group..."
+EFS_SG_ID=$(aws ec2 describe-security-groups \
+  --filters "Name=group-name,Values=ollama-efs-sg" "Name=vpc-id,Values=${VPC_ID}" \
+  --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || echo "")
+if [ -z "$EFS_SG_ID" ] || [ "$EFS_SG_ID" = "None" ]; then
+  EFS_SG_ID=$(aws ec2 create-security-group \
+    --group-name ollama-efs-sg \
+    --description "NFS access for Ollama EFS model cache" \
+    --vpc-id "$VPC_ID" \
+    --query 'GroupId' --output text)
+  aws ec2 authorize-security-group-ingress \
+    --group-id "$EFS_SG_ID" \
+    --protocol tcp --port 2049 \
+    --cidr "$VPC_CIDR"
+  log "Created EFS security group: $EFS_SG_ID"
+else
+  log "EFS security group already exists: $EFS_SG_ID"
+fi
+
+log "Creating EFS filesystem..."
+EFS_ID=$(aws efs describe-file-systems \
+  --query "FileSystems[?Tags[?Key=='Name'&&Value=='ollama-models']].FileSystemId" \
+  --output text 2>/dev/null || echo "")
+if [ -z "$EFS_ID" ]; then
+  EFS_ID=$(aws efs create-file-system \
+    --performance-mode generalPurpose \
+    --throughput-mode elastic \
+    --encrypted \
+    --tags Key=Name,Value=ollama-models \
+    --query 'FileSystemId' --output text)
+  log "Created EFS filesystem: $EFS_ID"
+  log "Waiting for EFS to become available..."
+  aws efs wait file-system-available --file-system-id "$EFS_ID"
+else
+  log "EFS filesystem already exists: $EFS_ID"
+fi
+save_env EFS_ID "$EFS_ID"
+
+log "Creating EFS mount targets in private subnets..."
+for subnet in $PRIVATE_SUBNETS; do
+  if aws efs describe-mount-targets \
+      --file-system-id "$EFS_ID" \
+      --query "MountTargets[?SubnetId=='${subnet}'].MountTargetId" \
+      --output text | grep -q "fsmt-"; then
+    log "Mount target already exists in subnet $subnet"
+  else
+    aws efs create-mount-target \
+      --file-system-id "$EFS_ID" \
+      --subnet-id "$subnet" \
+      --security-groups "$EFS_SG_ID"
+    log "Created mount target in subnet $subnet"
+  fi
+done
+
+log "Attaching AmazonElasticFileSystemReadOnlyAccess to node instance roles..."
+for role in $NODE_ROLES; do
+  if aws iam list-attached-role-policies --role-name "$role" \
+      --query 'AttachedPolicies[].PolicyArn' --output text \
+      | grep -q "ElasticFileSystem"; then
+    log "EFS policy already attached to $role"
+  else
+    aws iam attach-role-policy \
+      --role-name "$role" \
+      --policy-arn arn:aws:iam::aws:policy/AmazonElasticFileSystemReadOnlyAccess
+    log "Attached EFS policy to $role"
+  fi
+done
+
+log "Installing AWS EFS CSI driver..."
+helm repo add aws-efs-csi-driver https://kubernetes-sigs.github.io/aws-efs-csi-driver 2>/dev/null || true
+helm repo update aws-efs-csi-driver
+if helm status aws-efs-csi-driver -n kube-system &>/dev/null; then
+  log "aws-efs-csi-driver already installed — skipping"
+else
+  helm upgrade --install aws-efs-csi-driver aws-efs-csi-driver/aws-efs-csi-driver \
+    --namespace kube-system \
+    --set controller.region="${REGION}" \
+    --wait --timeout 180s
+  log "aws-efs-csi-driver installed"
+fi
+
+log "Creating EFS StorageClass and shared PV/PVC for Ollama models..."
+kubectl apply -f - <<EOF
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: efs-sc
+provisioner: efs.csi.aws.com
+volumeBindingMode: Immediate
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: efs-ollama-models
+spec:
+  capacity:
+    storage: 50Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: efs-sc
+  csi:
+    driver: efs.csi.aws.com
+    volumeHandle: ${EFS_ID}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: infra
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ollama-models-shared
+  namespace: infra
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: efs-sc
+  resources:
+    requests:
+      storage: 50Gi
+  volumeName: efs-ollama-models
+EOF
+log "EFS PVC ollama-models-shared ready in infra namespace"
 
 log "EKS cluster ready — all nodegroups on spot"

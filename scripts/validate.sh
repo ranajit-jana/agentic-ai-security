@@ -58,7 +58,7 @@ check "Ollama judge responding with llama3.1" \
 
 check "Ollama embed responding with nomic-embed-text" \
   "curl -sf http://ollama-embed.infra.svc.cluster.local:11434/api/tags \
-   | jq -r '.models[].name' | grep -q 'nomic-embed-text'"
+   | jq -r '.models[].name' | grep -q 'nomic-embed-text:v1.5'"
 
 check "LiteLLM proxy healthy" \
   "curl -sf http://litellm.infra.svc.cluster.local:4000/health | grep -q healthy"

@@ -26,9 +26,7 @@ kubectl wait pod "$POD" -n infra --for=condition=Ready --timeout=600s
 
 echo "Confirming model $MODEL loaded in $INSTANCE..."
 for i in $(seq 1 60); do
-  if kubectl exec -n infra "$POD" -- \
-       curl -sf http://localhost:11434/api/tags \
-       | grep -q "$MODEL"; then
+  if kubectl exec -n infra "$POD" -- ollama list 2>/dev/null | grep -q "$MODEL"; then
     echo "$INSTANCE: model $MODEL ready"
     exit 0
   fi

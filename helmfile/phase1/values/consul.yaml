@@ -2,8 +2,7 @@ global:
   name: consul
   datacenter: ap-south-1
   tls:
-    enabled: true
-    enableAutoEncrypt: true
+    enabled: false
   acls:
     manageSystemACLs: true
 

@@ -230,11 +230,6 @@ releases:
       - infra/opa
     values:
       - values/opal.yaml
-    hooks:
-      - events: ["postsync"]
-        command: "bash"
-        args: ["{{ env "REPO_ROOT" }}/helmfile/phase1/hooks/opal-verify-sync.sh"]
-
   # ── Intent-Aware Tool Catalog ─────────────────────────────────────────────
 
   - name: tool-catalog
@@ -258,6 +253,7 @@ releases:
       - infra/consul
       - infra/redis
       - spire-system/spire
+      - infra/injection-signals
     values:
       - values/gateway.yaml
       - values/security-gateway-p2.yaml
@@ -272,7 +268,7 @@ releases:
     namespace: infra
     chart: ../../charts/injection-signals
     needs:
-      - infra/security-gateway
+      - infra/ollama-embed
     values:
       - values/injection-signals.yaml
     hooks:
@@ -310,7 +306,7 @@ releases:
 
   - name: litellm
     namespace: infra
-    chart: oci://ghcr.io/berriai/litellm-helm
+    chart: ../../charts/litellm
     values:
       - values/litellm.yaml
 

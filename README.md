@@ -235,17 +235,18 @@ dig +short grafana.rj-lab.click
 
 ### Nightly Destroy / Morning Rebuild
 
-The EKS cluster (~$330/month if left running) should be destroyed when not in use. Resources that cost under $2/month (KMS, ECR, ACM, Route 53, SNS, IAM) are kept permanently — `01_aws_infra.sh` only needs to run once ever.
+The EKS cluster (~$330/month if left running) should be destroyed when not in use. Resources that cost under $2/month (KMS, ECR, ACM, Route 53, SNS, IAM, EFS) are kept permanently — `01_aws_infra.sh` only needs to run once ever.
 
 **Evening (~2 min):**
 ```bash
 bash scripts/destroy.sh
-# Removes: ALB → LBC → LBC IAM → EKS cluster + NAT gateway + VPC
+# Removes: ALB → LBC → EKS cluster + NAT gateway + VPC
+# Keeps:   EFS ollama-models (models persist — no re-download on next rebuild)
 ```
 
-**Morning (~35 min — Ollama model pull cached after first run):**
+**Morning (~20 min — Ollama skips model download, EFS already has models):**
 ```bash
-bash scripts/02_eks_cluster.sh      # recreate cluster + register fresh OIDC provider
+bash scripts/02_eks_cluster.sh      # recreate cluster + EFS CSI driver + mount EFS PVC
 bash scripts/03_kubeconfig.sh       # point kubectl at it
 bash scripts/04_helmfile_deploy.sh  # deploy Phase 1 + Phase 2 + wire DNS automatically
 bash scripts/validate.sh
@@ -259,7 +260,7 @@ bash scripts/validate.sh
 
 | Resource | Per month |
 |---|---|
-| EC2 nodes — spot (3×t3.medium + 2×t3.large + 1×t3.medium + 1×g4dn.xlarge) | ~$81 |
+| EC2 nodes — spot (3×t3.medium + 2×t3.large + 1×t3.medium + 2×m5.xlarge) | ~$75 |
 | EKS control plane | ~$72 |
 | NAT Gateway | ~$14 |
 | ALB | ~$7 |
@@ -268,6 +269,7 @@ bash scripts/validate.sh
 
 | Resource | Per month |
 |---|---|
+| EFS — `ollama-models` (llama3.1:8b + nomic-embed-text, ~5 GB) | ~$1.50 |
 | KMS key | $1.00 |
 | Route 53 hosted zone | $0.50 |
 | ECR images | ~$0.30 |
@@ -304,9 +306,9 @@ The `sync-duo-secret.sh` presync hook reads Vault automatically on every deploy 
 | `injection-signals` | `./charts/injection-signals` | Builds arc_pi_taxonomy embedding index for injection detection |
 | `ciba-acp` | `./charts/ciba-acp` | Upgraded with Duo Mobile push |
 | `hash-verifier` | `./charts/hash-verifier` | CronJob — verifies tool OCI digest + MCP hash every 60s |
-| `litellm` | OCI `ghcr.io/berriai/litellm-helm` | Unified model gateway — routes to Claude or local Ollama |
+| `litellm` | `./charts/litellm` | Unified model gateway — routes to Claude or local Ollama (stateless, no DB) |
 
-> Ollama runs on the `inference` nodegroup (t3.xlarge, 16 GB RAM). `llama3.1:8b` requires ~6 GB RAM — CPU-only, no GPU needed.
+> Ollama runs on the `inference` nodegroup (`m5.xlarge`, 16 GB RAM, CPU-only). `llama3.1:8b` requires ~6 GB RAM; adequate for background policy checks (~10 tok/s). All three instances share one EFS volume (`ollama-models-shared`) — models download once on first deploy and persist across cluster rebuilds.
 
 See [docs/phase2.md](docs/phase2.md) for a detailed explanation of each component.
 
@@ -339,6 +341,7 @@ bash scripts/validate_phase3.sh
 | ACM certificate | `*.rj-lab.click` (wildcard, DNS-validated) |
 | ALB Ingress | `platform-public-alb` in `istio-system` |
 | LBC IAM role | `AmazonEKSLoadBalancerControllerRole` |
+| EFS filesystem | `ollama-models` — shared Ollama model cache (survives cluster teardown) |
 
 ### Node Groups
 
@@ -349,7 +352,7 @@ All nodegroups run **spot instances** (~70% cheaper than on-demand). Multiple in
 | `system` | `t3.medium` · `t3a.medium` · `t3.large` | 3 | CoreDNS · Consul · SPIRE · Istio · Vault · Keycloak · OPA · Gateway · OPAL · Tool Catalog |
 | `application` | `t3.large` · `t3a.large` · `m5.large` | 2–4 | Agents · LiteLLM |
 | `observability` | `t3.medium` · `t3a.medium` | 1–2 | OTel · Loki · Grafana |
-| `inference` | `g4dn.xlarge` · `g4dn.2xlarge` | 1–2 | Ollama judge · Ollama policy · Ollama embed — NVIDIA T4 GPU, 35–50 tokens/sec |
+| `inference` | `m5.xlarge` · `m5a.xlarge` · `m5.2xlarge` | 1–2 | Ollama judge · Ollama policy · Ollama embed — CPU inference, ~10 tok/s (adequate for background policy checks) |
 
 ---
 

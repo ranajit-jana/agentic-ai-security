@@ -36,7 +36,7 @@ spec:
               python /scripts/build_injection_embeddings.py \
                 --taxonomy /tmp/taxonomy \
                 --output /data/injection_signals.pkl \
-                --model nomic-embed-text \
+                --model nomic-embed-text:v1.5 \
                 --ollama-url http://ollama-embed.infra.svc.cluster.local:11434
           volumeMounts:
             - name: signal-data

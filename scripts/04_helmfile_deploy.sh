@@ -70,8 +70,91 @@ helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm
 helm repo add grafana        https://grafana.github.io/helm-charts                        2>/dev/null || true
 helm repo add ollama         https://otwld.github.io/ollama-helm                          2>/dev/null || true
 helm repo add permitio       https://permitio.github.io/opal-helm-chart                   2>/dev/null || true
+helm repo add aws-efs-csi-driver https://kubernetes-sigs.github.io/aws-efs-csi-driver     2>/dev/null || true
 helm repo update
 log "Helm repos ready"
+
+# ── EFS CSI driver + shared Ollama model PVC ─────────────────────────────────
+# Runs here (not in 02_eks_cluster.sh) because:
+#   1. infra namespace is created by helmfile on first sync
+#   2. EFS_ID is already saved to .env by 02_eks_cluster.sh
+
+log "Attaching EFS read policy to node instance roles..."
+NODE_ROLES=$(aws iam list-roles \
+  --query "Roles[?contains(RoleName, \`agentic-security\`) && contains(RoleName, \`NodeInstanceRole\`)].RoleName" \
+  --output text)
+for role in $NODE_ROLES; do
+  if aws iam list-attached-role-policies --role-name "$role" \
+      --query 'AttachedPolicies[].PolicyArn' --output text \
+      | grep -q "ElasticFileSystem"; then
+    log "EFS policy already attached to $role"
+  else
+    aws iam attach-role-policy \
+      --role-name "$role" \
+      --policy-arn arn:aws:iam::aws:policy/AmazonElasticFileSystemReadOnlyAccess
+    log "Attached EFS policy to $role"
+  fi
+done
+
+log "Ensuring EFS CSI driver is installed..."
+if helm status aws-efs-csi-driver -n kube-system &>/dev/null; then
+  log "aws-efs-csi-driver already installed — skipping"
+else
+  helm upgrade --install aws-efs-csi-driver aws-efs-csi-driver/aws-efs-csi-driver \
+    --namespace kube-system \
+    --set controller.region="${REGION}" \
+    --wait --timeout 180s
+  log "aws-efs-csi-driver installed"
+fi
+
+log "Ensuring ollama-models-shared PVC exists..."
+if kubectl get pvc ollama-models-shared -n infra &>/dev/null; then
+  log "ollama-models-shared PVC already exists — skipping"
+else
+  if [ -z "${EFS_ID:-}" ]; then
+    log "ERROR: EFS_ID not set in .env — run 02_eks_cluster.sh first"
+    exit 1
+  fi
+  kubectl apply -f - <<EOF
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: efs-sc
+provisioner: efs.csi.aws.com
+volumeBindingMode: Immediate
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: efs-ollama-models
+spec:
+  capacity:
+    storage: 30Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: efs-sc
+  csi:
+    driver: efs.csi.aws.com
+    volumeHandle: ${EFS_ID}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ollama-models-shared
+  namespace: infra
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: efs-sc
+  resources:
+    requests:
+      storage: 30Gi
+  volumeName: efs-ollama-models
+EOF
+  log "ollama-models-shared PVC created (backed by EFS ${EFS_ID})"
+fi
 
 # ── Deploy via helmfile ───────────────────────────────────────────────────────
 

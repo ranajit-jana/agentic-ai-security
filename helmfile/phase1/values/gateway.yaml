@@ -16,7 +16,7 @@ serviceAccount:
   name: security-gateway
 
 env:
-  OPA_URL: "http://opa.infra.svc.cluster.local:8181"
+  OPA_URL: "http://opa.infra.svc.cluster.local:8282"
   CONSUL_URL: "http://consul-server.infra.svc.cluster.local:8500"
   REDIS_URL: "redis://redis-master.infra.svc.cluster.local:6379"
   OLLAMA_URL: "http://ollama-judge.infra.svc.cluster.local:11434"

@@ -1,0 +1,116 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tool-catalog-app
+  namespace: {{ .Release.Namespace }}
+data:
+  app.py: |
+    import os, json, base64, logging
+    from fastapi import FastAPI, HTTPException
+    from pydantic import BaseModel
+    from typing import Optional
+    import httpx
+
+    logging.basicConfig(level=logging.INFO)
+    log = logging.getLogger("tool-catalog")
+
+    app = FastAPI(title="Tool Catalog")
+
+    OPA_URL     = os.getenv("OPA_URL",     "http://opa.infra.svc.cluster.local:8282")
+    CONSUL_URL  = os.getenv("CONSUL_URL",  "http://consul-server.infra.svc.cluster.local:8500")
+    OLLAMA_URL  = os.getenv("OLLAMA_JUDGE_URL", "http://ollama-judge.infra.svc.cluster.local:11434")
+
+    # ── Helpers ───────────────────────────────────────────────────────────────
+
+    async def consul_kv_list(prefix: str) -> dict:
+        async with httpx.AsyncClient(timeout=5) as c:
+            r = await c.get(f"{CONSUL_URL}/v1/kv/{prefix}?recurse=true")
+            if r.status_code == 404:
+                return {}
+            r.raise_for_status()
+            result = {}
+            for entry in r.json():
+                key = entry["Key"][len(prefix):]
+                result[key] = json.loads(base64.b64decode(entry["Value"]).decode())
+            return result
+
+    async def opa_allow(input_doc: dict) -> bool:
+        async with httpx.AsyncClient(timeout=5) as c:
+            r = await c.post(f"{OPA_URL}/v1/data/agentic/baseline/allow",
+                             json={"input": input_doc})
+            r.raise_for_status()
+            return bool(r.json().get("result", False))
+
+    # ── Routes ────────────────────────────────────────────────────────────────
+
+    @app.get("/health")
+    async def health():
+        return {"status": "ok"}
+
+    @app.get("/tools")
+    async def list_tools():
+        tools = await consul_kv_list("tools/")
+        return {"tools": tools}
+
+    @app.get("/tools/{tool_id}")
+    async def get_tool(tool_id: str):
+        tools = await consul_kv_list(f"tools/{tool_id}")
+        if not tools:
+            raise HTTPException(status_code=404, detail=f"Tool '{tool_id}' not found")
+        return tools.get(tool_id) or next(iter(tools.values()))
+
+    @app.get("/agents")
+    async def list_agents():
+        agents = await consul_kv_list("agents/")
+        return {"agents": agents}
+
+    class ValidateRequest(BaseModel):
+        agent_type: str
+        tool: str
+        principal_type: str = "agent"
+        data_class: str = "public"
+
+    @app.post("/validate")
+    async def validate(req: ValidateRequest):
+        allowed = await opa_allow(req.model_dump())
+        return {"allowed": allowed, "agent_type": req.agent_type, "tool": req.tool}
+
+    class IntentRequest(BaseModel):
+        agent_type: str
+        tool: str
+        intent: str
+        principal_type: str = "agent"
+        data_class: str = "public"
+
+    @app.post("/validate/intent")
+    async def validate_intent(req: IntentRequest):
+        """Validate tool access and check intent alignment via Ollama Judge."""
+        # Step 1: policy check
+        policy_input = {k: v for k, v in req.model_dump().items() if k != "intent"}
+        allowed = await opa_allow(policy_input)
+        if not allowed:
+            return {"allowed": False, "reason": "policy_denied", "intent_aligned": None}
+
+        # Step 2: LLM intent alignment check
+        prompt = (
+            f"An agent of type '{req.agent_type}' wants to use tool '{req.tool}' "
+            f"with stated intent: '{req.intent}'. "
+            "Is this intent aligned with the tool's purpose and safe to allow? "
+            "Reply with only YES or NO."
+        )
+        try:
+            async with httpx.AsyncClient(timeout=30) as c:
+                r = await c.post(f"{OLLAMA_URL}/api/generate",
+                                 json={"model": "llama3.1:8b", "prompt": prompt, "stream": False})
+                r.raise_for_status()
+                answer = r.json().get("response", "").strip().upper()
+                intent_aligned = answer.startswith("YES")
+        except Exception as e:
+            log.warning("Ollama judge unavailable: %s", e)
+            intent_aligned = True  # fail open when judge is down
+
+        return {
+            "allowed": intent_aligned,
+            "reason": "intent_aligned" if intent_aligned else "intent_misaligned",
+            "intent_aligned": intent_aligned,
+        }

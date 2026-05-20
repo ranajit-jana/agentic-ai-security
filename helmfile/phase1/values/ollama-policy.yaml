@@ -2,27 +2,22 @@ fullnameOverride: ollama-policy
 
 ollama:
   gpu:
-    enabled: true
-    type: nvidia
-    number: 1
+    enabled: false
   models:
-    - llama3.1:8b
+    pull:
+      - llama3.1:8b
+
+persistentVolume:
+  enabled: true
+  existingClaim: ollama-models-shared
 
 nodeSelector:
   role: inference
 
-tolerations:
-  - key: nvidia.com/gpu
-    operator: Equal
-    value: "true"
-    effect: NoSchedule
-
 resources:
   requests:
-    cpu: 1000m
-    memory: 2Gi
-    nvidia.com/gpu: "1"
+    cpu: 500m
+    memory: 6Gi
   limits:
     cpu: 4000m
-    memory: 8Gi
-    nvidia.com/gpu: "1"
+    memory: 12Gi

@@ -25,7 +25,7 @@ check "Ollama judge responding with llama3.1" \
 
 check "Ollama embed responding with nomic-embed-text" \
   "curl -sf http://ollama-embed.infra.svc.cluster.local:11434/api/tags \
-   | jq -r '.models[].name' | grep -q 'nomic-embed-text'"
+   | jq -r '.models[].name' | grep -q 'nomic-embed-text:v1.5'"
 
 check "Cedar enforcing task-scoped tool policy" \
   "curl -sf -X POST http://security-gateway.infra.svc.cluster.local/test/cedar \

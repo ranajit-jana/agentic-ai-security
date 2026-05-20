@@ -45,3 +45,10 @@ kv_put tools/send_email \
   '{"mcp_endpoint":"https://email.tools.svc.cluster.local","allowed_callers":["email-agent","orchestrator-agent"],"data_classification":"confidential","blast_radius":"high","status":"active"}'
 
 echo "Consul agent and tool registries seeded"
+
+# Allow anonymous read on agents/ and tools/ so OPAL can fetch without a token
+kubectl exec -n infra "$CONSUL_POD" -- \
+  env CONSUL_HTTP_TOKEN="$CONSUL_TOKEN" consul acl policy update \
+  -name anonymous-token-policy \
+  -rules 'node_prefix "" { policy = "read" } service_prefix "" { policy = "read" } key_prefix "agents/" { policy = "read" } key_prefix "tools/" { policy = "read" }'
+echo "Anonymous policy updated for OPAL KV reads"

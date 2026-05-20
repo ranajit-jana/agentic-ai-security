@@ -1,16 +1,19 @@
-opal-server:
-  dataSourceConfig:
-    entries:
-      - url: "http://consul.infra.svc.cluster.local:8500/v1/kv/agents?recurse=true"
-        topics:
-          - agents
-      - url: "http://consul.infra.svc.cluster.local:8500/v1/kv/tools?recurse=true"
-        topics:
-          - tools
-  broadcastChannelRoot: "opal"
+server:
+  policyRepoUrl: https://github.com/permitio/opal-example-policy-repo
+  pollingInterval: 30
+  dataConfigSources:
+    config:
+      entries:
+        - url: "http://consul-server.infra.svc.cluster.local:8500/v1/kv/agents?recurse=true"
+          topics:
+            - agents
+          dst_path: "/agents"
+        - url: "http://consul-server.infra.svc.cluster.local:8500/v1/kv/tools?recurse=true"
+          topics:
+            - tools
+          dst_path: "/tools"
 
-opal-client:
-  opaServerUrl: "http://opa.infra.svc.cluster.local:8181"
-  policySubscriptionTopics:
-    - agents
-    - tools
+client:
+  opaServerUrl: "http://opa.infra.svc.cluster.local:8282"
+  extraEnv:
+    OPAL_DATA_TOPICS: "agents,tools"

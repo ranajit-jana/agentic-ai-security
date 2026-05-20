@@ -30,4 +30,14 @@ resources:
 
 service:
   type: ClusterIP
-  port: 8181
+  port: 443
+
+# Expose an HTTP listener on 8282 for OPAL client (avoids collision with localhost:8181)
+extraArgs:
+  - "--addr=http://0.0.0.0:8282"
+
+extraPorts:
+  - port: 8282
+    protocol: TCP
+    name: http
+    targetPort: 8282

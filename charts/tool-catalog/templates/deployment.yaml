@@ -18,28 +18,54 @@ spec:
       serviceAccountName: {{ .Values.serviceAccount.name }}
       nodeSelector:
         {{- toYaml .Values.nodeSelector | nindent 8 }}
+      initContainers:
+        - name: pip-install
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["pip", "install", "--target=/app/deps", "--quiet",
+                    "fastapi==0.111.0", "uvicorn==0.29.0", "httpx==0.27.0"]
+          volumeMounts:
+            - name: deps
+              mountPath: /app/deps
       containers:
         - name: tool-catalog
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          ports:
-            - containerPort: {{ .Values.service.port }}
+          command: ["python", "-m", "uvicorn", "app:app",
+                    "--host", "0.0.0.0", "--port", "{{ .Values.service.port }}"]
+          workingDir: /app
           env:
+            - name: PYTHONPATH
+              value: /app/deps
             {{- range $key, $val := .Values.env }}
             - name: {{ $key }}
               value: {{ $val | quote }}
             {{- end }}
+          ports:
+            - containerPort: {{ .Values.service.port }}
+          volumeMounts:
+            - name: app-code
+              mountPath: /app/app.py
+              subPath: app.py
+            - name: deps
+              mountPath: /app/deps
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           livenessProbe:
             httpGet:
               path: /health
               port: {{ .Values.service.port }}
-            initialDelaySeconds: 10
+            initialDelaySeconds: 15
             periodSeconds: 15
           readinessProbe:
             httpGet:
               path: /health
               port: {{ .Values.service.port }}
-            initialDelaySeconds: 5
+            initialDelaySeconds: 10
             periodSeconds: 10
+      volumes:
+        - name: app-code
+          configMap:
+            name: tool-catalog-app
+        - name: deps
+          emptyDir: {}

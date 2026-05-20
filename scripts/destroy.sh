@@ -23,6 +23,7 @@ echo ""
 echo " Region:  $REGION  |  Account: $ACCOUNT_ID"
 echo ""
 echo " Kept (free): KMS key, ECR, SNS, ACM, Route 53, IAM roles/policies"
+echo " Kept (paid ~\$1.50/mo): EFS ollama-models — survives rebuild, no re-download"
 echo "══════════════════════════════════════════════════════════════"
 echo ""
 read -r -p "Type 'destroy' to confirm: " CONFIRM

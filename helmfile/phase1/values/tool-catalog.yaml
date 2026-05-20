@@ -6,9 +6,9 @@ image:
 nodeSelector:
   role: system
 env:
-  OPA_URL: "http://opa.infra.svc.cluster.local:8181"
+  OPA_URL: "http://opa.infra.svc.cluster.local:8282"
   OLLAMA_JUDGE_URL: "http://ollama-judge.infra.svc.cluster.local:11434"
-  CONSUL_URL: "http://consul.infra.svc.cluster.local:8500"
+  CONSUL_URL: "http://consul-server.infra.svc.cluster.local:8500"
 serviceAccount:
   name: tool-catalog
 service:

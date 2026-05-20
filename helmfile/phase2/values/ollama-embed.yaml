@@ -4,7 +4,7 @@ ollama:
   gpu:
     enabled: false
   models:
-    - nomic-embed-text
+    - nomic-embed-text:v1.5
 
 nodeSelector:
   role: system
