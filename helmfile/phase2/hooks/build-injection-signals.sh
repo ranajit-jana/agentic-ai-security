@@ -27,7 +27,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: build
-          image: python:3.11-slim
+          image: 923373850235.dkr.ecr.ap-south-1.amazonaws.com/mirror/python:3.11-slim
           command: ["/bin/bash", "-c"]
           args:
             - |

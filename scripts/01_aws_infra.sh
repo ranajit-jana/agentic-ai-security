@@ -132,5 +132,125 @@ log "Attached ALB policy to $ALB_ROLE_NAME"
 # Then set ACM_CERT_ARN in scripts/.env and update keycloak.yaml ingress annotations.
 log "Skipping ACM certificate — Keycloak ALB will use HTTP"
 
+# ── Private subnets + NAT Gateway in the default VPC ─────────────────────────
+# The default VPC (172.31.0.0/16) already has public subnets and an IGW.
+# We only add private subnets (for EKS nodes + EFS) and a NAT Gateway.
+# These are created once here and reused across every cluster rebuild.
+
+CLUSTER_NAME="agentic-security"
+
+log "Locating default VPC..."
+VPC_ID=$(aws ec2 describe-vpcs \
+  --filters "Name=isDefault,Values=true" \
+  --query 'Vpcs[0].VpcId' --output text)
+[ -z "$VPC_ID" ] || [ "$VPC_ID" = "None" ] && die "No default VPC found in $REGION"
+log "Default VPC: $VPC_ID"
+save_env VPC_ID "$VPC_ID"
+
+# Read the existing public subnets (one per AZ) and their AZs
+log "Reading existing public subnets..."
+readarray -t PUB_SUBNET_IDS < <(aws ec2 describe-subnets \
+  --filters "Name=vpc-id,Values=${VPC_ID}" \
+            "Name=defaultForAz,Values=true" \
+  --query 'Subnets | sort_by(@, &AvailabilityZone)[].SubnetId' \
+  --output text | tr '\t' '\n')
+readarray -t PUB_SUBNET_AZS < <(aws ec2 describe-subnets \
+  --filters "Name=vpc-id,Values=${VPC_ID}" \
+            "Name=defaultForAz,Values=true" \
+  --query 'Subnets | sort_by(@, &AvailabilityZone)[].AvailabilityZone' \
+  --output text | tr '\t' '\n')
+[ "${#PUB_SUBNET_IDS[@]}" -lt 2 ] && die "Expected at least 2 default public subnets in $VPC_ID"
+log "Public subnets: ${PUB_SUBNET_IDS[*]}"
+
+# Tag and name the existing public subnets for EKS ALB discovery
+log "Tagging default public subnets for EKS..."
+for i in "${!PUB_SUBNET_IDS[@]}"; do
+  sub="${PUB_SUBNET_IDS[$i]}"
+  az="${PUB_SUBNET_AZS[$i]}"
+  aws ec2 create-tags --resources "$sub" --tags \
+    "Key=Name,Value=public-${az}" \
+    "Key=kubernetes.io/cluster/${CLUSTER_NAME},Value=shared" \
+    "Key=kubernetes.io/role/elb,Value=1"
+done
+
+# Create one private subnet per AZ (172.31.48/64/80.0/20 — beyond the default /20 blocks)
+# Default subnets occupy 172.31.0-47.x; private subnets start at 172.31.48.0
+log "Creating private subnets (one per AZ)..."
+declare -a PRI_CIDRS=("172.31.48.0/20" "172.31.64.0/20" "172.31.80.0/20")
+FIRST_PUB_SUBNET="${PUB_SUBNET_IDS[0]}"
+
+for i in "${!PUB_SUBNET_AZS[@]}"; do
+  az="${PUB_SUBNET_AZS[$i]}"
+  cidr="${PRI_CIDRS[$i]}"
+  name="private-${az}"
+  existing=$(aws ec2 describe-subnets \
+    --filters "Name=tag:Name,Values=${name}" "Name=vpc-id,Values=${VPC_ID}" \
+    --query 'Subnets[0].SubnetId' --output text 2>/dev/null)
+  if [ -z "$existing" ] || [ "$existing" = "None" ]; then
+    sub_id=$(aws ec2 create-subnet --vpc-id "$VPC_ID" \
+      --cidr-block "$cidr" --availability-zone "$az" \
+      --query 'Subnet.SubnetId' --output text)
+    aws ec2 create-tags --resources "$sub_id" --tags \
+      Key=Name,Value="${name}" \
+      "Key=kubernetes.io/cluster/${CLUSTER_NAME},Value=shared" \
+      "Key=kubernetes.io/role/internal-elb,Value=1"
+    log "Created private subnet $name ($az $cidr): $sub_id"
+  else
+    log "Private subnet $name already exists: $existing"
+    # Ensure tags are present (idempotent re-run)
+    aws ec2 create-tags --resources "$existing" --tags \
+      "Key=kubernetes.io/cluster/${CLUSTER_NAME},Value=shared" \
+      "Key=kubernetes.io/role/internal-elb,Value=1"
+  fi
+done
+
+# NAT Gateway — single, in the first public subnet
+log "Creating NAT Gateway..."
+NAT_GW_ID=$(aws ec2 describe-nat-gateways \
+  --filter "Name=subnet-id,Values=${FIRST_PUB_SUBNET}" \
+           "Name=state,Values=available,pending" \
+  --query 'NatGateways[0].NatGatewayId' --output text 2>/dev/null)
+if [ -z "$NAT_GW_ID" ] || [ "$NAT_GW_ID" = "None" ]; then
+  EIP_ALLOC=$(aws ec2 allocate-address --domain vpc \
+    --query 'AllocationId' --output text)
+  NAT_GW_ID=$(aws ec2 create-nat-gateway \
+    --subnet-id "$FIRST_PUB_SUBNET" \
+    --allocation-id "$EIP_ALLOC" \
+    --tag-specifications \
+      "ResourceType=natgateway,Tags=[{Key=Name,Value=agentic-security-natgw}]" \
+    --query 'NatGateway.NatGatewayId' --output text)
+  log "Waiting for NAT Gateway $NAT_GW_ID..."
+  aws ec2 wait nat-gateway-available --nat-gateway-ids "$NAT_GW_ID"
+  log "NAT Gateway ready: $NAT_GW_ID"
+else
+  log "NAT Gateway already exists: $NAT_GW_ID"
+fi
+save_env NAT_GW_ID "$NAT_GW_ID"
+
+# Private route table — 0.0.0.0/0 → NAT GW; associate all private subnets
+log "Creating private route table..."
+PRI_RT=$(aws ec2 describe-route-tables \
+  --filters "Name=tag:Name,Values=private-rt" "Name=vpc-id,Values=${VPC_ID}" \
+  --query 'RouteTables[0].RouteTableId' --output text 2>/dev/null)
+if [ -z "$PRI_RT" ] || [ "$PRI_RT" = "None" ]; then
+  PRI_RT=$(aws ec2 create-route-table --vpc-id "$VPC_ID" \
+    --query 'RouteTable.RouteTableId' --output text)
+  aws ec2 create-tags --resources "$PRI_RT" --tags Key=Name,Value=private-rt
+  aws ec2 create-route --route-table-id "$PRI_RT" \
+    --destination-cidr-block "0.0.0.0/0" --nat-gateway-id "$NAT_GW_ID"
+  for i in "${!PUB_SUBNET_AZS[@]}"; do
+    az="${PUB_SUBNET_AZS[$i]}"
+    sub=$(aws ec2 describe-subnets \
+      --filters "Name=tag:Name,Values=private-${az}" \
+               "Name=vpc-id,Values=${VPC_ID}" \
+      --query 'Subnets[0].SubnetId' --output text)
+    aws ec2 associate-route-table --route-table-id "$PRI_RT" \
+      --subnet-id "$sub" >/dev/null
+  done
+  log "Created private route table: $PRI_RT"
+else
+  log "Private route table already exists: $PRI_RT"
+fi
+
 log "AWS infrastructure ready"
 log "Saved environment to scripts/.env — source it or run scripts in order"

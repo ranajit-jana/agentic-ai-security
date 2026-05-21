@@ -1,4 +1,7 @@
 server:
+  image:
+    repository: 923373850235.dkr.ecr.ap-south-1.amazonaws.com/mirror/opal-server
+    tag: "0.7.12"
   policyRepoUrl: https://github.com/permitio/opal-example-policy-repo
   pollingInterval: 30
   dataConfigSources:
@@ -14,6 +17,9 @@ server:
           dst_path: "/tools"
 
 client:
+  image:
+    repository: 923373850235.dkr.ecr.ap-south-1.amazonaws.com/mirror/opal-client
+    tag: "0.7.12"
   opaServerUrl: "http://opa.infra.svc.cluster.local:8282"
   extraEnv:
     OPAL_DATA_TOPICS: "agents,tools"

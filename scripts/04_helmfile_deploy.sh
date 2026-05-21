@@ -10,7 +10,7 @@ check_aws_auth
 
 export REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 REGION=$(aws configure get region)
-HELMFILE_PATH="${REPO_ROOT}/helmfile/phase1/helmfile.yaml.gotmpl"
+PHASE1="${REPO_ROOT}/helmfile/phase1"
 
 # ── Install helm ──────────────────────────────────────────────────────────────
 
@@ -74,9 +74,36 @@ helm repo add aws-efs-csi-driver https://kubernetes-sigs.github.io/aws-efs-csi-d
 helm repo update
 log "Helm repos ready"
 
+# ── gp2-csi StorageClass (required by injection-signals PVC before helmfile) ──
+
+log "Ensuring gp2-csi StorageClass exists..."
+if kubectl get storageclass gp2-csi &>/dev/null; then
+  log "gp2-csi StorageClass already exists"
+else
+  kubectl apply -f - <<'YAML'
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: gp2-csi
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+provisioner: ebs.csi.aws.com
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Delete
+parameters:
+  type: gp2
+YAML
+  log "gp2-csi StorageClass created"
+fi
+
+# ── infra namespace (must exist before EFS PVC below) ────────────────────────
+
+log "Ensuring infra namespace exists..."
+kubectl get namespace infra &>/dev/null || kubectl create namespace infra
+
 # ── EFS CSI driver + shared Ollama model PVC ─────────────────────────────────
 # Runs here (not in 02_eks_cluster.sh) because:
-#   1. infra namespace is created by helmfile on first sync
+#   1. infra namespace is created above
 #   2. EFS_ID is already saved to .env by 02_eks_cluster.sh
 
 log "Attaching EFS read policy to node instance roles..."
@@ -105,6 +132,28 @@ else
     --set controller.region="${REGION}" \
     --wait --timeout 180s
   log "aws-efs-csi-driver installed"
+fi
+
+log "Ensuring efs-ap StorageClass exists (dynamic EFS Access Point provisioning)..."
+if kubectl get storageclass efs-ap &>/dev/null; then
+  log "efs-ap StorageClass already exists"
+else
+  if [ -z "${EFS_ID:-}" ]; then
+    log "ERROR: EFS_ID not set — run 02_eks_cluster.sh first"
+    exit 1
+  fi
+  kubectl apply -f - <<EOF
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: efs-ap
+provisioner: efs.csi.aws.com
+parameters:
+  provisioningMode: efs-ap
+  fileSystemId: ${EFS_ID}
+  directoryPerms: "755"
+EOF
+  log "efs-ap StorageClass created"
 fi
 
 log "Ensuring ollama-models-shared PVC exists..."
@@ -156,13 +205,34 @@ EOF
   log "ollama-models-shared PVC created (backed by EFS ${EFS_ID})"
 fi
 
-# ── Deploy via helmfile ───────────────────────────────────────────────────────
-
-log "Running helmfile sync (this will take 20-30 min — Ollama pulls ~4.7 GB on first run)..."
+# ── Deploy via helmfile (4 groups) ───────────────────────────────────────────
 cd "${REPO_ROOT}"
-helmfile sync -f "${HELMFILE_PATH}"
 
-log "Deployment complete (Phase 1 + Phase 2)"
+log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+log "GROUP 1/4 — Network layer: Istio + SPIRE  (~5 min)"
+log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+helmfile sync -f "${PHASE1}/helmfile-1-network.yaml.gotmpl"
+log "Group 1 complete"
+
+log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+log "GROUP 2/4 — Core services: Consul/Vault/Keycloak/OPA/OPAL/Redis/Observability  (~8 min)"
+log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+helmfile sync -f "${PHASE1}/helmfile-2-core.yaml.gotmpl" --concurrency 3
+log "Group 2 complete"
+
+log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+log "GROUP 3/4 — Inference: Ollama  (~10 min, models already on EFS so fast after first run)"
+log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+helmfile sync -f "${PHASE1}/helmfile-3-inference.yaml.gotmpl" --concurrency 3
+log "Group 3 complete"
+
+log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+log "GROUP 4/4 — Applications: Security Gateway / Tool Catalog / Agents  (~5 min)"
+log "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+helmfile sync -f "${PHASE1}/helmfile-4-app.yaml.gotmpl" --concurrency 3
+log "Group 4 complete"
+
+log "Deployment complete"
 
 # ── Wire Route 53 ALIAS records → ALB ────────────────────────────────────────
 

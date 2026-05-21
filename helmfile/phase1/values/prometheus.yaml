@@ -1,0 +1,50 @@
+server:
+  image:
+    repository: 923373850235.dkr.ecr.ap-south-1.amazonaws.com/mirror/prometheus
+    tag: "v3.11.3"
+
+  nodeSelector:
+    role: observability
+
+  persistentVolume:
+    enabled: true
+    size: 20Gi
+    storageClass: gp2-csi
+
+  retention: 15d
+
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+  global:
+    scrape_interval: 30s
+    evaluation_interval: 30s
+
+configmapReload:
+  prometheus:
+    image:
+      repository: 923373850235.dkr.ecr.ap-south-1.amazonaws.com/mirror/prometheus-config-reloader
+      tag: "v0.91.0"
+
+prometheus-node-exporter:
+  image:
+    registry: 923373850235.dkr.ecr.ap-south-1.amazonaws.com
+    repository: mirror/node-exporter
+    tag: "v1.11.1"
+
+kube-state-metrics:
+  image:
+    registry: 923373850235.dkr.ecr.ap-south-1.amazonaws.com
+    repository: mirror/kube-state-metrics
+    tag: "v2.18.0"
+
+alertmanager:
+  enabled: false
+
+pushgateway:
+  enabled: false

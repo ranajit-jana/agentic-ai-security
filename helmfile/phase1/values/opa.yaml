@@ -1,11 +1,15 @@
 replicaCount: 2
 
+image:
+  repository: 923373850235.dkr.ecr.ap-south-1.amazonaws.com/mirror/opa
+  tag: "0.40.0"
+
 nodeSelector:
   role: system
 
-# OPA runs as a sidecar-style service; OPAL keeps policies in sync
-opa:
-  enabled: true
+# Disable the default OPA config to avoid the quickstart bundle (uses rego.v1 syntax
+# not supported by OPA 0.40.0). Policies are loaded via kube-mgmt and hook scripts.
+opa: false
 
 authz:
   enabled: false
@@ -15,6 +19,9 @@ authz:
 
 mgmt:
   enabled: true
+  image:
+    repository: 923373850235.dkr.ecr.ap-south-1.amazonaws.com/mirror/kube-mgmt
+    tag: "4.1.1"
   configmapPolicies:
     enabled: true
     namespaces: [infra]

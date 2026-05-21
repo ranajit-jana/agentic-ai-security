@@ -37,7 +37,14 @@ if eksctl get cluster --name "$CLUSTER_NAME" --region "$REGION" &>/dev/null; the
   log "Cluster $CLUSTER_NAME already exists — skipping creation"
 else
   log "Creating EKS cluster $CLUSTER_NAME (this takes ~15 min)..."
-  cat <<EOF | eksctl create cluster -f -
+
+  # VPC_ID comes from .env written by 01_aws_infra.sh
+  [ -z "${VPC_ID:-}" ] && die "VPC_ID not set — run 01_aws_infra.sh first"
+
+  EKSCTL_CONFIG=$(mktemp /tmp/eksctl-config-XXXX.yaml)
+
+  # Write header
+  cat > "$EKSCTL_CONFIG" << EOF
 apiVersion: eksctl.io/v1alpha5
 kind: ClusterConfig
 metadata:
@@ -54,15 +61,37 @@ addons:
   - name: eks-pod-identity-agent
     version: latest
 vpc:
-  nat:
-    gateway: Single
+  id: ${VPC_ID}
+  subnets:
+    private:
+EOF
+
+  # Append private subnets (avoids bash stripping trailing newlines from variables)
+  aws ec2 describe-subnets \
+    --filters "Name=vpc-id,Values=${VPC_ID}" \
+              "Name=tag:kubernetes.io/role/internal-elb,Values=1" \
+    --query 'Subnets | sort_by(@, &AvailabilityZone)[].[AvailabilityZone, SubnetId]' \
+    --output text | awk '{printf "      %s:\n        id: %s\n", $1, $2}' >> "$EKSCTL_CONFIG"
+
+  grep -q "id:" "$EKSCTL_CONFIG" || die "No private subnets found in VPC $VPC_ID — run 01_aws_infra.sh first"
+
+  echo "    public:" >> "$EKSCTL_CONFIG"
+
+  aws ec2 describe-subnets \
+    --filters "Name=vpc-id,Values=${VPC_ID}" \
+              "Name=tag:kubernetes.io/role/elb,Values=1" \
+    --query 'Subnets | sort_by(@, &AvailabilityZone)[].[AvailabilityZone, SubnetId]' \
+    --output text | awk '{printf "      %s:\n        id: %s\n", $1, $2}' >> "$EKSCTL_CONFIG"
+
+  # Append node groups
+  cat >> "$EKSCTL_CONFIG" << EOF
 managedNodeGroups:
   - name: system
     instanceTypes: [t3.medium, t3a.medium, t3.large]
     spot: true
-    minSize: 3
-    maxSize: 4
-    desiredCapacity: 3
+    minSize: 4
+    maxSize: 6
+    desiredCapacity: 4
     labels: {role: system}
     privateNetworking: true
     tags:
@@ -99,6 +128,9 @@ managedNodeGroups:
       k8s.io/cluster-autoscaler/enabled: "true"
       k8s.io/cluster-autoscaler/${CLUSTER_NAME}: "owned"
 EOF
+
+  eksctl create cluster -f "$EKSCTL_CONFIG"
+  rm -f "$EKSCTL_CONFIG"
   log "Cluster created"
 fi
 
@@ -228,8 +260,7 @@ log "NVIDIA device plugin installed"
 # All three Ollama pods share one EFS volume so llama3.1:8b is downloaded once
 # and persists across pod restarts/node replacements and instance-type changes.
 
-VPC_ID=$(aws eks describe-cluster --name "$CLUSTER_NAME" \
-  --query 'cluster.resourcesVpcConfig.vpcId' --output text)
+[ -z "${VPC_ID:-}" ] && die "VPC_ID not set — run 01_aws_infra.sh first"
 VPC_CIDR=$(aws ec2 describe-vpcs --vpc-ids "$VPC_ID" \
   --query 'Vpcs[0].CidrBlock' --output text)
 PRIVATE_SUBNETS=$(aws ec2 describe-subnets \

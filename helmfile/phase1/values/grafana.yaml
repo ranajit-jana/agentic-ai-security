@@ -1,3 +1,12 @@
+image:
+  repository: 923373850235.dkr.ecr.ap-south-1.amazonaws.com/mirror/grafana
+  tag: "12.3.1"
+
+sidecar:
+  image:
+    repository: 923373850235.dkr.ecr.ap-south-1.amazonaws.com/mirror/k8s-sidecar
+    tag: "2.5.0"
+
 nodeSelector:
   role: observability
 
@@ -18,6 +27,21 @@ datasources:
         url: http://loki.observability.svc.cluster.local:3100
         access: proxy
         isDefault: true
+
+      - name: Tempo
+        type: tempo
+        url: http://tempo.observability.svc.cluster.local:3100
+        access: proxy
+        jsonData:
+          tracesToLogsV2:
+            datasourceUid: loki
+          lokiSearch:
+            datasourceUid: loki
+
+      - name: Prometheus
+        type: prometheus
+        url: http://prometheus-server.observability.svc.cluster.local
+        access: proxy
 
 dashboardProviders:
   dashboardproviders.yaml:

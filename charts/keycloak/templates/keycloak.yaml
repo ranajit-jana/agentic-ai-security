@@ -27,7 +27,7 @@ spec:
       nodeSelector: {{ toYaml .Values.nodeSelector | nindent 8 }}
       initContainers:
         - name: wait-for-postgres
-          image: busybox:1.36.1
+          image: 923373850235.dkr.ecr.ap-south-1.amazonaws.com/mirror/busybox:1.36.1
           command:
             - sh
             - -c

@@ -1,0 +1,40 @@
+image:
+  registry: 923373850235.dkr.ecr.ap-south-1.amazonaws.com
+  repository: mirror/promtail
+  tag: "3.5.1"
+
+config:
+  clients:
+    - url: http://loki.observability.svc.cluster.local:3100/loki/api/v1/push
+
+  snippets:
+    pipelineStages:
+      - cri: {}
+      - json:
+          expressions:
+            level: level
+      - labels:
+          level:
+
+tolerations:
+  - effect: NoSchedule
+    operator: Exists
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 128Mi
+
+configmap:
+  enabled: false
+
+sidecar:
+  configReloader:
+    enabled: true
+    image:
+      registry: 923373850235.dkr.ecr.ap-south-1.amazonaws.com
+      repository: mirror/configmap-reload
+      tag: "v0.12.0"

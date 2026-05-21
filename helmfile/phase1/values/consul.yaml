@@ -1,6 +1,7 @@
 global:
   name: consul
   datacenter: ap-south-1
+  image: "923373850235.dkr.ecr.ap-south-1.amazonaws.com/mirror/consul:1.22.7"
   tls:
     enabled: false
   acls:

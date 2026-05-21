@@ -22,8 +22,9 @@ echo "   • EKS cluster $CLUSTER_NAME and all EC2 nodes"
 echo ""
 echo " Region:  $REGION  |  Account: $ACCOUNT_ID"
 echo ""
-echo " Kept (free): KMS key, ECR, SNS, ACM, Route 53, IAM roles/policies"
-echo " Kept (paid ~\$1.50/mo): EFS ollama-models — survives rebuild, no re-download"
+echo " Kept (free):  KMS key, ECR, SNS, ACM, Route 53, IAM roles/policies"
+echo " Kept (free):  VPC, subnets, IGW, route tables"
+echo " Kept (paid):  NAT Gateway (~\$32/mo), EFS ollama-models (~\$1.50/mo)"
 echo "══════════════════════════════════════════════════════════════"
 echo ""
 read -r -p "Type 'destroy' to confirm: " CONFIRM
@@ -55,10 +56,12 @@ fi
 log "Skipping LBC IAM role/policy deletion — IAM resources are free and reused on rebuild"
 
 # ── Step 4: Delete EKS cluster ────────────────────────────────────────────────
+# VPC/subnets are managed by 01_aws_infra.sh and are NOT in the eksctl CloudFormation
+# stack — eksctl will only delete EKS-specific resources (control plane, node groups).
 if eksctl get cluster --name "$CLUSTER_NAME" --region "$REGION" &>/dev/null; then
   log "Deleting EKS cluster $CLUSTER_NAME (~10 min)..."
   eksctl delete cluster --name "$CLUSTER_NAME" --region "$REGION" --wait
-  log "EKS cluster deleted — EC2 nodes and NAT gateway removed"
+  log "EKS cluster deleted — EC2 nodes removed"
 else
   log "EKS cluster $CLUSTER_NAME not found — nothing to delete"
 fi
@@ -77,10 +80,13 @@ fi
 
 echo ""
 echo "══════════════════════════════════════════════════════════════"
-echo " Done — ALB, cluster, nodes, and OIDC provider deleted."
-echo " No more EC2/NAT/ALB charges."
+echo " Done — ALB, cluster, and nodes deleted."
+echo " No more EC2/ALB charges."
 echo ""
-echo " To rebuild (skip step 1 — infra persists):"
+echo " Still running (persistent infra from 01_aws_infra.sh):"
+echo "   NAT Gateway ~\$32/mo  |  EFS ollama-models ~\$1.50/mo"
+echo ""
+echo " To rebuild (step 1 already done — infra persists):"
 echo "   bash scripts/02_eks_cluster.sh"
 echo "   bash scripts/03_kubeconfig.sh"
 echo "   bash scripts/04_helmfile_deploy.sh"

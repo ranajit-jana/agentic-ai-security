@@ -1,4 +1,7 @@
 opal-server:
+  image:
+    repository: 923373850235.dkr.ecr.ap-south-1.amazonaws.com/mirror/opal-server
+    tag: "0.7.12"
   dataSourceConfig:
     entries:
       - url: "http://consul.infra.svc.cluster.local:8500/v1/kv/agents?recurse=true"
@@ -10,6 +13,9 @@ opal-server:
   broadcastChannelRoot: "opal"
 
 opal-client:
+  image:
+    repository: 923373850235.dkr.ecr.ap-south-1.amazonaws.com/mirror/opal-client
+    tag: "0.7.12"
   opaServerUrl: "http://opa.infra.svc.cluster.local:8181"
   policySubscriptionTopics:
     - agents

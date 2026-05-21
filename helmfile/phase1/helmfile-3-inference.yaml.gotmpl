@@ -1,0 +1,41 @@
+repositories:
+  - name: ollama
+    url: https://otwld.github.io/ollama-helm
+
+helmDefaults:
+  wait: true
+  timeout: 900
+  createNamespace: true
+
+releases:
+
+  # All three are independent — helmfile deploys them in parallel with --concurrency 3
+  - name: ollama-judge
+    namespace: infra
+    chart: ollama/ollama
+    values:
+      - values/ollama-judge.yaml
+    hooks:
+      - events: ["postsync"]
+        command: "bash"
+        args: ["{{ env "REPO_ROOT" }}/helmfile/phase1/hooks/ollama-wait-models.sh", "ollama-judge", "llama3.1:8b"]
+
+  - name: ollama-policy
+    namespace: infra
+    chart: ollama/ollama
+    values:
+      - values/ollama-policy.yaml
+    hooks:
+      - events: ["postsync"]
+        command: "bash"
+        args: ["{{ env "REPO_ROOT" }}/helmfile/phase1/hooks/ollama-wait-models.sh", "ollama-policy", "llama3.1:8b"]
+
+  - name: ollama-embed
+    namespace: infra
+    chart: ollama/ollama
+    values:
+      - values/ollama-embed.yaml
+    hooks:
+      - events: ["postsync"]
+        command: "bash"
+        args: ["{{ env "REPO_ROOT" }}/helmfile/phase1/hooks/ollama-wait-models.sh", "ollama-embed", "nomic-embed-text"]

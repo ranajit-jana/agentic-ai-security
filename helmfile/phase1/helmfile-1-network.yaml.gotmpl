@@ -1,0 +1,63 @@
+repositories:
+  - name: istio
+    url: https://istio-release.storage.googleapis.com/charts
+  - name: spiffe
+    url: https://spiffe.github.io/helm-charts-hardened
+
+helmDefaults:
+  wait: true
+  timeout: 300
+  createNamespace: true
+
+releases:
+
+  - name: istio-base
+    namespace: istio-system
+    chart: istio/base
+    values:
+      - values/istio-base.yaml
+
+  - name: istiod
+    namespace: istio-system
+    chart: istio/istiod
+    needs:
+      - istio-system/istio-base
+    values:
+      - values/istiod.yaml
+    hooks:
+      - events: ["postsync"]
+        command: "kubectl"
+        args: [apply, -f, "{{ env "REPO_ROOT" }}/helmfile/phase1/manifests/peer-authentication-strict.yaml"]
+
+  - name: spire-crds
+    namespace: spire-system
+    chart: spiffe/spire-crds
+    needs:
+      - istio-system/istiod
+
+  - name: spire
+    namespace: spire-system
+    chart: spiffe/spire
+    needs:
+      - spire-system/spire-crds
+    values:
+      - values/spire.yaml
+    hooks:
+      - events: ["postsync"]
+        command: "bash"
+        args: ["{{ env "REPO_ROOT" }}/helmfile/phase1/hooks/spire-register-entries.sh"]
+
+  - name: istio-gateway
+    namespace: istio-system
+    chart: istio/gateway
+    needs:
+      - istio-system/istiod
+    values:
+      - values/istio-gateway.yaml
+    hooks:
+      - events: ["postsync"]
+        command: "kubectl"
+        args: [apply, -f, "{{ env "REPO_ROOT" }}/helmfile/phase1/manifests/security-gateway-ingress.yaml"]
+      - events: ["postsync"]
+        command: "kubectl"
+        args: [apply, -f, "{{ env "REPO_ROOT" }}/helmfile/phase1/manifests/alb-ingress.yaml"]

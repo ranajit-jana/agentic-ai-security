@@ -1,7 +1,7 @@
 replicaCount: 1
 
 image:
-  repository: quay.io/keycloak/keycloak
+  repository: 923373850235.dkr.ecr.ap-south-1.amazonaws.com/mirror/keycloak
   tag: "26.2.5"
   pullPolicy: IfNotPresent
 
@@ -40,7 +40,7 @@ adminPassword: "changeme-set-via-vault"
 postgresql:
   enabled: true
   image:
-    repository: postgres
+    repository: 923373850235.dkr.ecr.ap-south-1.amazonaws.com/mirror/postgres
     tag: "16.9-alpine3.21"
     pullPolicy: IfNotPresent
   database: keycloak

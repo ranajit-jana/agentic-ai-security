@@ -1,22 +1,37 @@
+deploymentMode: SingleBinary
+
 loki:
-  enabled: true
+  auth_enabled: false
+
+  image:
+    registry: 923373850235.dkr.ecr.ap-south-1.amazonaws.com
+    repository: mirror/loki
+    tag: "3.6.7"
+
+  commonConfig:
+    replication_factor: 1
+
+  storage:
+    type: filesystem
+
+  schemaConfig:
+    configs:
+      - from: "2024-01-01"
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: loki_index_
+          period: 24h
+
+singleBinary:
+  replicas: 1
   nodeSelector:
     role: observability
   persistence:
     enabled: true
     size: 20Gi
-    storageClassName: gp2-csi
-  config:
-    auth_enabled: false
-    schema_config:
-      configs:
-        - from: "2024-01-01"
-          store: boltdb-shipper
-          object_store: filesystem
-          schema: v11
-          index:
-            prefix: index_
-            period: 24h
+    storageClass: gp2-csi
   resources:
     requests:
       cpu: 200m
@@ -25,8 +40,26 @@ loki:
       cpu: 500m
       memory: 512Mi
 
-promtail:
-  enabled: true
-  config:
-    clients:
-      - url: http://loki.observability.svc.cluster.local:3100/loki/api/v1/push
+# Disable unused scalable components
+read:
+  replicas: 0
+write:
+  replicas: 0
+backend:
+  replicas: 0
+
+minio:
+  enabled: false
+gateway:
+  enabled: false
+
+monitoring:
+  selfMonitoring:
+    enabled: false
+    grafanaAgent:
+      installOperator: false
+  lokiCanary:
+    enabled: false
+
+test:
+  enabled: false

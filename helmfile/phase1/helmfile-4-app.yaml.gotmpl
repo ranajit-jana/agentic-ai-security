@@ -1,0 +1,72 @@
+helmDefaults:
+  wait: true
+  timeout: 300
+  createNamespace: true
+
+releases:
+
+  # tool-catalog, injection-signals, hash-verifier, litellm — no intra-group deps, run in parallel
+  - name: tool-catalog
+    namespace: infra
+    chart: ../../charts/tool-catalog
+    values:
+      - values/tool-catalog.yaml
+
+  - name: injection-signals
+    namespace: infra
+    chart: ../../charts/injection-signals
+    values:
+      - values/injection-signals.yaml
+    hooks:
+      - events: ["postsync"]
+        command: "bash"
+        args: ["{{ env "REPO_ROOT" }}/helmfile/phase1/hooks/build-injection-signals.sh"]
+
+  - name: hash-verifier
+    namespace: infra
+    chart: ../../charts/hash-verifier
+    values:
+      - values/hash-verifier.yaml
+
+  - name: litellm
+    namespace: infra
+    chart: ../../charts/litellm
+    values:
+      - values/litellm.yaml
+
+  # security-gateway waits for both tool-catalog and injection-signals
+  - name: security-gateway
+    namespace: infra
+    chart: ../../charts/security-gateway
+    needs:
+      - infra/tool-catalog
+      - infra/injection-signals
+    values:
+      - values/gateway.yaml
+      - values/security-gateway-p2.yaml
+    hooks:
+      - events: ["postsync"]
+        command: "bash"
+        args: ["{{ env "REPO_ROOT" }}/helmfile/phase1/hooks/biscuit-key-bootstrap.sh"]
+
+  # ciba-acp and agents both wait for security-gateway
+  - name: ciba-acp
+    namespace: infra
+    chart: ../../charts/ciba-acp
+    needs:
+      - infra/security-gateway
+    values:
+      - values/ciba-acp.yaml
+      - values/ciba-acp-p2.yaml
+    hooks:
+      - events: ["presync"]
+        command: "bash"
+        args: ["{{ env "REPO_ROOT" }}/helmfile/phase1/hooks/sync-duo-secret.sh"]
+
+  - name: agents
+    namespace: agents
+    chart: ../../charts/agents
+    needs:
+      - infra/security-gateway
+    values:
+      - values/agents.yaml

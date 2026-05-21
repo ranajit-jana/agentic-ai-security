@@ -1,5 +1,5 @@
 image:
-  repository: redis
+  repository: 923373850235.dkr.ecr.ap-south-1.amazonaws.com/mirror/redis
   tag: "7.4.3-alpine3.21"
   pullPolicy: IfNotPresent
 

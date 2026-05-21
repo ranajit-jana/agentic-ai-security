@@ -1,5 +1,9 @@
 fullnameOverride: ollama-policy
 
+image:
+  repository: 923373850235.dkr.ecr.ap-south-1.amazonaws.com/mirror/ollama
+  tag: "0.23.2"
+
 ollama:
   gpu:
     enabled: false

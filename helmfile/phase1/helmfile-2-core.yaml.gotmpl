@@ -1,0 +1,133 @@
+repositories:
+  - name: hashicorp
+    url: https://helm.releases.hashicorp.com
+  - name: opa
+    url: https://open-policy-agent.github.io/kube-mgmt/charts
+  - name: open-telemetry
+    url: https://open-telemetry.github.io/opentelemetry-helm-charts
+  - name: grafana
+    url: https://grafana.github.io/helm-charts
+  - name: permitio
+    url: https://permitio.github.io/opal-helm-chart
+  - name: prometheus-community
+    url: https://prometheus-community.github.io/helm-charts
+
+helmDefaults:
+  wait: true
+  timeout: 300
+  createNamespace: true
+
+releases:
+
+  # consul, redis, otel-collector have no intra-group deps — deploy in parallel
+  - name: consul
+    namespace: infra
+    chart: hashicorp/consul
+    values:
+      - values/consul.yaml
+    hooks:
+      - events: ["postsync"]
+        command: "bash"
+        args: ["{{ env "REPO_ROOT" }}/helmfile/phase1/hooks/consul-seed-registries.sh"]
+      - events: ["postsync"]
+        command: "bash"
+        args: ["{{ env "REPO_ROOT" }}/helmfile/phase1/hooks/consul-coredns-patch.sh"]
+
+  - name: redis
+    namespace: infra
+    chart: ../../charts/redis
+    values:
+      - values/redis.yaml
+
+  - name: otel-collector
+    namespace: observability
+    chart: open-telemetry/opentelemetry-collector
+    values:
+      - values/otel-collector.yaml
+
+  # Second wave — depends on consul
+  - name: vault
+    namespace: infra
+    chart: hashicorp/vault
+    needs:
+      - infra/consul
+    values:
+      - values/vault.yaml
+    hooks:
+      - events: ["postsync"]
+        command: "bash"
+        args: ["{{ env "REPO_ROOT" }}/helmfile/phase1/hooks/vault-init.sh"]
+
+  - name: opa
+    namespace: infra
+    chart: opa/opa
+    needs:
+      - infra/consul
+    values:
+      - values/opa.yaml
+    hooks:
+      - events: ["postsync"]
+        command: "bash"
+        args: ["{{ env "REPO_ROOT" }}/helmfile/phase1/hooks/opa-load-policies.sh"]
+
+  - name: loki
+    namespace: observability
+    chart: grafana/loki
+    needs:
+      - observability/otel-collector
+    values:
+      - values/loki.yaml
+
+  - name: promtail
+    namespace: observability
+    chart: grafana/promtail
+    needs:
+      - observability/loki
+    values:
+      - values/promtail.yaml
+
+  - name: tempo
+    namespace: observability
+    chart: grafana/tempo
+    needs:
+      - observability/otel-collector
+    values:
+      - values/tempo.yaml
+
+  - name: prometheus
+    namespace: observability
+    chart: prometheus-community/prometheus
+    values:
+      - values/prometheus.yaml
+
+  # Third wave
+  - name: keycloak
+    namespace: infra
+    chart: ../../charts/keycloak
+    needs:
+      - infra/vault
+    values:
+      - values/keycloak.yaml
+    hooks:
+      - events: ["postsync"]
+        command: "bash"
+        args: ["{{ env "REPO_ROOT" }}/helmfile/phase1/hooks/keycloak-configure.sh"]
+
+  - name: opal
+    namespace: infra
+    chart: permitio/opal
+    needs:
+      - infra/consul
+      - infra/opa
+    values:
+      - values/opal.yaml
+
+  - name: grafana
+    namespace: observability
+    chart: grafana/grafana
+    needs:
+      - observability/loki
+      - observability/tempo
+      - observability/prometheus
+    values:
+      - values/grafana.yaml
