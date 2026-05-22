@@ -330,6 +330,10 @@ Adds: KubeArmor (runtime syscall enforcement) · AWS GuardDuty EKS runtime · Ap
 
 > OpenSearch was evaluated and dropped — replaced by Flink + ClickHouse for lower memory footprint and native CEP support. See `docs/phase3.md` for the decision record.
 
+review GKE Agent Sandbox
+Usually with a exec() call or a subprocess. Usually directly on whatever machine is running your app.
+If you've shipped this to production, you already know the existential dread that comes with it. LLM-generated code is fundamentally untrusted — it's not code a human engineer reviewed. It could write to the wrong path. It could make outbound network calls. It could loop forever and eat your CPU. And in any multi-tenant environment, one agent's bad output could poison another's environment entirely.
+
 ```bash
 bash scripts/phase3/00_prereqs_phase3.sh
 bash scripts/phase3/01_guardduty.sh
