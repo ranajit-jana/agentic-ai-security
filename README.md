@@ -58,10 +58,12 @@ A production-grade security infrastructure for agentic AI systems, deployed on A
 | Secrets | HashiCorp Vault (HA Raft 3-node) + AWS KMS auto-unseal |
 | Gateway | FastAPI orchestrator + Envoy + LiteLLM |
 | Rate limiting | Redis |
-| Tracing | OpenTelemetry → Loki → Grafana |
+| Tracing | OTel Collector → Tempo (distributed traces) → Grafana |
+| Metrics | Prometheus (cluster + app metrics) → Grafana |
+| Log shipping | Promtail → Loki → Grafana (WARNING+ only) |
 | Audit logging | OTel Collector → Loki → Grafana (WARNING+ only) |
 | Log level | WARNING and above across all services — INFO suppressed at source |
-| Container registry | AWS ECR (immutable tags, scan on push) |
+| Container registry | AWS ECR (immutable tags, scan on push) — public images mirrored via `00_ecr_mirror.sh` |
 | IaC | AWS CLI + eksctl (infra) · Helmfile (K8s workloads) |
 
 ---
@@ -72,16 +74,23 @@ A production-grade security infrastructure for agentic AI systems, deployed on A
 .
 ├── scripts/
 │   ├── lib/common.sh            # Shared helper functions
+│   ├── 00_ecr_mirror.sh         # Mirror public images to ECR — fast pulls, no rate limits (run once per tag bump)
 │   ├── 01_aws_infra.sh          # KMS · ECR · SNS · IAM roles (run once)
 │   ├── 02_eks_cluster.sh        # EKS cluster · 4 node groups · EBS CSI
 │   ├── 03_kubeconfig.sh         # aws eks update-kubeconfig
-│   ├── 04_helmfile_deploy.sh    # Install helm/helmfile + deploy all releases
+│   ├── 04_helmfile_deploy.sh    # Install helm/helmfile + deploy all releases (4 ordered groups)
 │   ├── destroy.sh               # Tear down ALB → LBC → LBC IAM → EKS cluster
-│   └── validate.sh              # Automated checks — all Phase 1 + Phase 2 checks
+│   ├── validate.sh              # Combined checks — Phase 1 + Phase 2
+│   ├── validate_phase1.sh       # Phase 1 only checks
+│   └── validate_phase2.sh       # Phase 2 only checks
 │
 ├── helmfile/
 │   └── phase1/
-│       ├── helmfile.yaml.gotmpl # All releases (Phase 1 + 2) with ordering + hooks
+│       ├── helmfile-1-network.yaml.gotmpl  # Group 1: Istio + SPIRE
+│       ├── helmfile-2-core.yaml.gotmpl     # Group 2: Consul/Vault/Keycloak/OPA/OPAL/Redis/Observability
+│       ├── helmfile-3-inference.yaml.gotmpl # Group 3: Ollama (judge/policy/embed)
+│       ├── helmfile-4-app.yaml.gotmpl      # Group 4: Gateway/Tool Catalog/Agents/LiteLLM
+│       ├── helmfile.yaml.gotmpl            # Legacy single-file reference (not used by deploy script)
 │       ├── values/              # Per-chart values files
 │       ├── hooks/               # Post/pre-deploy configuration scripts
 │       └── manifests/           # Raw K8s manifests (PeerAuthentication, Ingress…)
@@ -126,7 +135,7 @@ A production-grade security infrastructure for agentic AI systems, deployed on A
 | `python3` | ≥ 3.8 | Used in hook scripts |
 | `dig` | any | Verify DNS propagation after deploy |
 
-> `helm` and `helmfile` are installed automatically by `04_helmfile_deploy.sh`.
+> `helm`, `helmfile`, and `crane` are installed automatically by their respective scripts — no manual install needed.
 
 #### IAM permissions required for `aws-dev`
 
@@ -139,7 +148,7 @@ The following inline policies must be attached to the deploying IAM user in addi
 
 ### Deploy — Combined Phase 1 + Phase 2
 
-Deploys everything in one run: Istio · SPIRE · Consul · Vault · Keycloak · OPA · Redis · Security Gateway · OTel · Loki · Grafana · Ollama (judge/policy/embed) · OPAL · Tool Catalog · Cedar/Biscuit/LLM Guard · Injection Signals · CIBA ACP + Duo · Hash Verifier · LiteLLM · Agents
+Deploys everything in one run across 4 ordered groups: Istio · SPIRE · Consul · Vault · Keycloak · OPA · Redis · OTel · Loki · Promtail · Tempo · Prometheus · Grafana · Ollama (judge/policy/embed) · OPAL · Tool Catalog · Cedar/Biscuit/LLM Guard · Injection Signals · CIBA ACP + Duo · Hash Verifier · LiteLLM · Agents
 
 **First time only:**
 ```bash
@@ -149,6 +158,9 @@ aws sts get-caller-identity   # verify
 
 # Step 1 — AWS resources (KMS, ECR, SNS, IAM roles) — run ONCE, persists forever
 bash scripts/01_aws_infra.sh
+
+# Step 1a — Mirror all public images to ECR — run ONCE (re-run only if image tags change)
+bash scripts/00_ecr_mirror.sh
 
 # Step 2 — EKS cluster + 4 node groups (~15 min)
 bash scripts/02_eks_cluster.sh
@@ -161,14 +173,14 @@ bash scripts/03_kubeconfig.sh
 #   vault kv put secret/duo ikey=<> skey=<> host=<>
 #   (see setup.txt → DUO CREDENTIALS for full steps)
 
-# Step 4 — Deploy all workloads + wire DNS (~35 min; Ollama pulls ~4.7 GB first run)
+# Step 4 — Deploy all workloads in 4 groups + wire DNS (~35 min; Ollama pulls ~4.7 GB first run)
 bash scripts/04_helmfile_deploy.sh
 
 # Step 5 — Validate all checks
 bash scripts/validate.sh
 ```
 
-**Every subsequent rebuild (skip step 1):**
+**Every subsequent rebuild (skip steps 1 and 1a):**
 ```bash
 bash scripts/02_eks_cluster.sh      # recreate cluster + OIDC provider
 bash scripts/03_kubeconfig.sh
@@ -280,7 +292,7 @@ bash scripts/validate.sh
 
 ### Phase 2 — Now Merged Into Phase 1 Deployment
 
-Phase 2 releases are included in `helmfile/phase1/helmfile.yaml.gotmpl` and deploy automatically with `04_helmfile_deploy.sh`. No separate deploy step required.
+Phase 2 releases are included in the 4 ordered helmfile groups under `helmfile/phase1/` and deploy automatically with `04_helmfile_deploy.sh`. No separate deploy step required.
 
 **Before first deploy, store Duo credentials in Vault** (Duo push won't work without them):
 ```bash
@@ -314,7 +326,9 @@ See [docs/phase2.md](docs/phase2.md) for a detailed explanation of each componen
 
 ### Phase 3 — Threat Management *(coming next)*
 
-Adds: KubeArmor · AWS GuardDuty EKS runtime · OpenSearch Security Analytics · Garak red teaming CI · Posture gap analysis dashboard
+Adds: KubeArmor (runtime syscall enforcement) · AWS GuardDuty EKS runtime · Apache Kafka (event stream) · Apache Flink (CEP correlation) · ClickHouse (security analytics store) · Garak red teaming CI · Posture gap analysis dashboard
+
+> OpenSearch was evaluated and dropped — replaced by Flink + ClickHouse for lower memory footprint and native CEP support. See `docs/phase3.md` for the decision record.
 
 ```bash
 bash scripts/phase3/00_prereqs_phase3.sh
@@ -351,7 +365,7 @@ All nodegroups run **spot instances** (~70% cheaper than on-demand). Multiple in
 |---|---|---|---|
 | `system` | `t3.medium` · `t3a.medium` · `t3.large` | 3 | CoreDNS · Consul · SPIRE · Istio · Vault · Keycloak · OPA · Gateway · OPAL · Tool Catalog |
 | `application` | `t3.large` · `t3a.large` · `m5.large` | 2–4 | Agents · LiteLLM |
-| `observability` | `t3.medium` · `t3a.medium` | 1–2 | OTel · Loki · Grafana |
+| `observability` | `t3.medium` · `t3a.medium` | 1–2 | OTel · Promtail · Loki · Tempo · Prometheus · Grafana |
 | `inference` | `m5.xlarge` · `m5a.xlarge` · `m5.2xlarge` | 1–2 | Ollama judge · Ollama policy · Ollama embed — CPU inference, ~10 tok/s (adequate for background policy checks) |
 
 ---
@@ -376,9 +390,10 @@ Agent  →  Gateway
 ### CIBA Human Approval
 
 ```
-Agent initiates CIBA → Keycloak → CIBA ACP → AWS SNS → SMS to user
+Agent initiates CIBA → Keycloak → CIBA ACP → Duo Mobile push (primary)
+                                           └→ AWS SNS / SMS (fallback)
                                                   ↓
-User taps approval link → Keycloak issues token → Agent polls → proceeds
+User taps approve in Duo → Keycloak issues token → Agent polls → proceeds
 ```
 
 ---
