@@ -137,7 +137,7 @@ A production-grade security infrastructure for agentic AI systems, deployed on A
 
 > `helm`, `helmfile`, and `crane` are installed automatically by their respective scripts — no manual install needed.
 
-#### IAM permissions required for `aws-dev`
+#### IAM permissions required for `aws login user`
 
 The following inline policies must be attached to the deploying IAM user in addition to `PowerUserAccess`:
 
