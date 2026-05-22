@@ -1,0 +1,255 @@
+---
+apiVersion: grafana.integreatly.org/v1beta1
+kind: Grafana
+metadata:
+  name: grafana
+  namespace: observability
+  labels:
+    dashboards: grafana
+spec:
+  deployment:
+    spec:
+      template:
+        spec:
+          nodeSelector:
+            role: observability
+          containers:
+            - name: grafana
+              image: 923373850235.dkr.ecr.ap-south-1.amazonaws.com/mirror/grafana:12.3.1
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 256Mi
+  persistentVolumeClaim:
+    spec:
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 5Gi
+      storageClassName: gp2-csi
+  config:
+    security:
+      admin_user: admin
+      admin_password: changeme-set-via-vault
+  service:
+    spec:
+      type: ClusterIP
+      ports:
+        - name: grafana
+          port: 80
+          protocol: TCP
+          targetPort: 3000
+---
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaDatasource
+metadata:
+  name: loki
+  namespace: observability
+spec:
+  instanceSelector:
+    matchLabels:
+      dashboards: grafana
+  datasource:
+    uid: loki
+    name: Loki
+    type: loki
+    url: http://loki.observability.svc.cluster.local:3100
+    access: proxy
+    isDefault: true
+---
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaDatasource
+metadata:
+  name: tempo
+  namespace: observability
+spec:
+  instanceSelector:
+    matchLabels:
+      dashboards: grafana
+  datasource:
+    uid: tempo
+    name: Tempo
+    type: tempo
+    url: http://tempo.observability.svc.cluster.local:3100
+    access: proxy
+    jsonData:
+      tracesToLogsV2:
+        datasourceUid: loki
+      lokiSearch:
+        datasourceUid: loki
+---
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaDatasource
+metadata:
+  name: prometheus
+  namespace: observability
+spec:
+  instanceSelector:
+    matchLabels:
+      dashboards: grafana
+  datasource:
+    uid: prometheus
+    name: Prometheus
+    type: prometheus
+    url: http://prometheus-server.observability.svc.cluster.local
+    access: proxy
+---
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaDashboard
+metadata:
+  name: security-gateway
+  namespace: observability
+spec:
+  instanceSelector:
+    matchLabels:
+      dashboards: grafana
+  folder: "Agentic Security"
+  json: |
+    {
+      "title": "Security Gateway",
+      "uid": "security-gw",
+      "schemaVersion": 36,
+      "refresh": "30s",
+      "time": {"from": "now-1h", "to": "now"},
+      "panels": [
+        {
+          "id": 1,
+          "type": "logs",
+          "title": "All Decisions",
+          "gridPos": {"h": 10, "w": 24, "x": 0, "y": 0},
+          "datasource": {"type": "loki", "uid": "loki"},
+          "targets": [{
+            "refId": "A",
+            "expr": "{app=\"security-gateway\", namespace=\"infra\"} | json | level=~\"(warning|error|critical|WARNING|ERROR|CRITICAL)\""
+          }],
+          "options": {
+            "dedupStrategy": "none",
+            "enableLogDetails": true,
+            "showTime": true,
+            "sortOrder": "Descending",
+            "wrapLogMessage": false
+          }
+        },
+        {
+          "id": 2,
+          "type": "logs",
+          "title": "Denied Requests",
+          "gridPos": {"h": 10, "w": 24, "x": 0, "y": 10},
+          "datasource": {"type": "loki", "uid": "loki"},
+          "targets": [{
+            "refId": "A",
+            "expr": "{app=\"security-gateway\", namespace=\"infra\"} | json | level=~\"(warning|error|critical|WARNING|ERROR|CRITICAL)\" |= \"deny\""
+          }],
+          "options": {
+            "dedupStrategy": "none",
+            "enableLogDetails": true,
+            "showTime": true,
+            "sortOrder": "Descending",
+            "wrapLogMessage": false
+          }
+        },
+        {
+          "id": 3,
+          "type": "logs",
+          "title": "HITL Triggers",
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 20},
+          "datasource": {"type": "loki", "uid": "loki"},
+          "targets": [{
+            "refId": "A",
+            "expr": "{app=\"security-gateway\", namespace=\"infra\"} | json | level=~\"(warning|error|critical|WARNING|ERROR|CRITICAL)\" |= \"hitl\""
+          }],
+          "options": {
+            "dedupStrategy": "none",
+            "enableLogDetails": true,
+            "showTime": true,
+            "sortOrder": "Descending",
+            "wrapLogMessage": false
+          }
+        }
+      ]
+    }
+---
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaDashboard
+metadata:
+  name: agent-activity
+  namespace: observability
+spec:
+  instanceSelector:
+    matchLabels:
+      dashboards: grafana
+  folder: "Agentic Security"
+  json: |
+    {
+      "title": "Agent Activity",
+      "uid": "agent-activity",
+      "schemaVersion": 36,
+      "refresh": "30s",
+      "time": {"from": "now-1h", "to": "now"},
+      "panels": [
+        {
+          "id": 1,
+          "type": "logs",
+          "title": "Orchestrator Agent",
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 0},
+          "datasource": {"type": "loki", "uid": "loki"},
+          "targets": [{
+            "refId": "A",
+            "expr": "{app=\"orchestrator-agent\", namespace=\"agents\"} | json | level=~\"(warning|error|critical|WARNING|ERROR|CRITICAL)\""
+          }],
+          "options": {"dedupStrategy": "none", "enableLogDetails": true, "showTime": true, "sortOrder": "Descending"}
+        },
+        {
+          "id": 2,
+          "type": "logs",
+          "title": "Web Search Agent",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+          "datasource": {"type": "loki", "uid": "loki"},
+          "targets": [{
+            "refId": "A",
+            "expr": "{app=\"web-search-agent\", namespace=\"agents\"} | json | level=~\"(warning|error|critical|WARNING|ERROR|CRITICAL)\""
+          }],
+          "options": {"dedupStrategy": "none", "enableLogDetails": true, "showTime": true, "sortOrder": "Descending"}
+        },
+        {
+          "id": 3,
+          "type": "logs",
+          "title": "Internal Data Agent",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+          "datasource": {"type": "loki", "uid": "loki"},
+          "targets": [{
+            "refId": "A",
+            "expr": "{app=\"internal-data-agent\", namespace=\"agents\"} | json | level=~\"(warning|error|critical|WARNING|ERROR|CRITICAL)\""
+          }],
+          "options": {"dedupStrategy": "none", "enableLogDetails": true, "showTime": true, "sortOrder": "Descending"}
+        },
+        {
+          "id": 4,
+          "type": "logs",
+          "title": "Email Agent",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+          "datasource": {"type": "loki", "uid": "loki"},
+          "targets": [{
+            "refId": "A",
+            "expr": "{app=\"email-agent\", namespace=\"agents\"} | json | level=~\"(warning|error|critical|WARNING|ERROR|CRITICAL)\""
+          }],
+          "options": {"dedupStrategy": "none", "enableLogDetails": true, "showTime": true, "sortOrder": "Descending"}
+        },
+        {
+          "id": 5,
+          "type": "logs",
+          "title": "Report Generation Agent",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+          "datasource": {"type": "loki", "uid": "loki"},
+          "targets": [{
+            "refId": "A",
+            "expr": "{app=\"report-generation-agent\", namespace=\"agents\"} | json | level=~\"(warning|error|critical|WARNING|ERROR|CRITICAL)\""
+          }],
+          "options": {"dedupStrategy": "none", "enableLogDetails": true, "showTime": true, "sortOrder": "Descending"}
+        }
+      ]
+    }

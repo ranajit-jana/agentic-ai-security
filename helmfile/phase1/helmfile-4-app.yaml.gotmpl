@@ -44,10 +44,6 @@ releases:
     values:
       - values/gateway.yaml
       - values/security-gateway-p2.yaml
-    hooks:
-      - events: ["postsync"]
-        command: "bash"
-        args: ["{{ env "REPO_ROOT" }}/helmfile/phase1/hooks/biscuit-key-bootstrap.sh"]
 
   # ciba-acp and agents both wait for security-gateway
   - name: ciba-acp

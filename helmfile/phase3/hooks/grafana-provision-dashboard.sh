@@ -2,18 +2,20 @@
 set -euo pipefail
 source "$(dirname "$0")/../../../scripts/lib/common.sh"
 
-log "Provisioning Security Posture dashboard into Grafana..."
+log "Provisioning Security Posture dashboard into Grafana via operator CRD..."
 
 kubectl apply -f - <<'EOF'
-apiVersion: v1
-kind: ConfigMap
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaDashboard
 metadata:
-  name: posture-dashboard
+  name: agentic-posture
   namespace: observability
-  labels:
-    grafana_dashboard: "1"
-data:
-  posture.json: |
+spec:
+  instanceSelector:
+    matchLabels:
+      dashboards: grafana
+  folder: "Security Posture"
+  json: |
     {
       "title": "Agentic AI Security Posture",
       "uid": "agentic-posture",
@@ -32,7 +34,8 @@ data:
           "fieldConfig": {"defaults": {"min":0,"max":100,"thresholds":{"steps":[
             {"value":0,"color":"red"},{"value":80,"color":"yellow"},{"value":95,"color":"green"}
           ]}}},
-          "targets": [{"datasource":"OpenSearch","query":"gap_analysis.coverage_pct"}]
+          "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse"},
+          "targets": [{"rawSql": "SELECT coverage_pct FROM security.gap_analysis ORDER BY ts DESC LIMIT 1"}]
         },
         {
           "title": "Injection Attempts — 24h",
@@ -62,13 +65,15 @@ data:
           "title": "KubeArmor Blocks — 24h",
           "type": "stat",
           "gridPos": {"x":8,"y":10,"w":4,"h":4},
-          "targets": [{"datasource":"OpenSearch","query":"kubearmor.action:Block AND @timestamp:[now-1d TO now]"}]
+          "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse"},
+          "targets": [{"rawSql": "SELECT count() FROM security.kubearmor_events WHERE action='Block' AND ts >= now() - INTERVAL 1 DAY"}]
         },
         {
           "title": "GuardDuty Findings",
           "type": "table",
           "gridPos": {"x":0,"y":14,"w":24,"h":6},
-          "targets": [{"datasource":"OpenSearch","query":"source:aws.guardduty"}]
+          "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse"},
+          "targets": [{"rawSql": "SELECT ts, severity, title, region FROM security.guardduty_findings ORDER BY ts DESC LIMIT 100"}]
         },
         {
           "title": "Cedar Policy Rejections",
@@ -86,13 +91,11 @@ data:
           "title": "Correlation Rule Alerts",
           "type": "table",
           "gridPos": {"x":0,"y":24,"w":24,"h":6},
-          "targets": [{"datasource":"OpenSearch","query":"_index:opensearch-alerting-alert*"}]
+          "datasource": {"type": "grafana-clickhouse-datasource", "uid": "clickhouse"},
+          "targets": [{"rawSql": "SELECT ts, rule_name, severity, details FROM security.flink_alerts ORDER BY ts DESC LIMIT 200"}]
         }
       ]
     }
 EOF
 
-kubectl rollout restart deployment grafana -n observability
-kubectl rollout status deployment grafana -n observability
-
-log "Security Posture dashboard provisioned"
+log "Security Posture dashboard CRD applied — operator will reconcile into Grafana"

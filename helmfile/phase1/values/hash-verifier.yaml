@@ -1,6 +1,6 @@
 schedule: "*/1 * * * *"
 image:
-  repository: python
+  repository: 923373850235.dkr.ecr.ap-south-1.amazonaws.com/mirror/python
   tag: "3.11-slim"
   pullPolicy: IfNotPresent
 env:

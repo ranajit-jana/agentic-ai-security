@@ -140,6 +140,12 @@ releases:
       - events: ["postsync"]
         command: "bash"
         args: ["{{ env "REPO_ROOT" }}/helmfile/phase3/hooks/clickhouse-init-schema.sh"]
+      - events: ["postsync"]
+        command: "kubectl"
+        args: [apply, -f, "{{ env "REPO_ROOT" }}/helmfile/phase3/manifests/grafana-clickhouse-datasource.yaml"]
+      - events: ["postsync"]
+        command: "bash"
+        args: ["{{ env "REPO_ROOT" }}/helmfile/phase3/hooks/grafana-provision-dashboard.sh"]
 
   # ── Policy Coverage Gap Analysis CronJob ─────────────────────────────────
   # Runs daily at 06:00. Compares tools/agents in Consul vs OPA/Cedar coverage.
@@ -153,18 +159,7 @@ releases:
     values:
       - values/gap-analysis.yaml
 
-  # ── Posture Dashboard (Grafana upgrade) ───────────────────────────────────
-  # Adds ClickHouse datasource (replaces OpenSearch) + provisions posture dashboard.
-  # Same release name as Phase 1 — Helmfile issues helm upgrade.
-
-  - name: grafana
-    namespace: observability
-    chart: grafana/grafana
-    needs:
-      - observability/clickhouse
-    values:
-      - values/grafana.yaml
-    hooks:
-      - events: ["postsync"]
-        command: "bash"
-        args: ["{{ env "REPO_ROOT" }}/helmfile/phase3/hooks/grafana-provision-dashboard.sh"]
+  # ── Posture Dashboard + ClickHouse datasource ────────────────────────────
+  # Applied as hooks on the clickhouse release (above).
+  # GrafanaDatasource CRD wires ClickHouse into Grafana via the operator.
+  # grafana-provision-dashboard.sh applies the posture GrafanaDashboard CRD.

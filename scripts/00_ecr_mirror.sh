@@ -71,6 +71,7 @@ mirror otel/opentelemetry-collector-contrib:0.152.0  mirror/otel-collector  0.15
 
 # ── Grafana stack ─────────────────────────────────────────────────────────────
 mirror grafana/grafana:12.3.1                    mirror/grafana         12.3.1
+mirror ghcr.io/grafana/grafana-operator:v5.23.0  mirror/grafana-operator  v5.23.0
 mirror grafana/loki:3.6.7                        mirror/loki            3.6.7
 mirror grafana/promtail:3.5.1                    mirror/promtail        3.5.1
 mirror grafana/tempo:2.9.0                       mirror/tempo           2.9.0

@@ -122,12 +122,17 @@ releases:
     values:
       - values/opal.yaml
 
-  - name: grafana
+  - name: grafana-operator
     namespace: observability
-    chart: grafana/grafana
+    chart: grafana/grafana-operator
+    version: "5.23.0"
     needs:
       - observability/loki
       - observability/tempo
       - observability/prometheus
     values:
-      - values/grafana.yaml
+      - values/grafana-operator.yaml
+    hooks:
+      - events: ["postsync"]
+        command: "kubectl"
+        args: [apply, -f, "{{ env "REPO_ROOT" }}/helmfile/phase1/manifests/grafana-instance.yaml"]

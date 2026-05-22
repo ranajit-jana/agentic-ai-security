@@ -28,7 +28,7 @@ env:
 postgresql:
   enabled: true
   image:
-    repository: postgres
+    repository: 923373850235.dkr.ecr.ap-south-1.amazonaws.com/mirror/postgres
     tag: "16.9-alpine3.21"
     pullPolicy: IfNotPresent
   database: keycloak

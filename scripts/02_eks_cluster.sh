@@ -87,11 +87,11 @@ EOF
   cat >> "$EKSCTL_CONFIG" << EOF
 managedNodeGroups:
   - name: system
-    instanceTypes: [t3.medium, t3a.medium, t3.large]
+    instanceTypes: [t3.large, t3a.large]
     spot: true
-    minSize: 4
+    minSize: 3
     maxSize: 6
-    desiredCapacity: 4
+    desiredCapacity: 3
     labels: {role: system}
     privateNetworking: true
     tags:
@@ -113,7 +113,7 @@ managedNodeGroups:
     spot: true
     minSize: 1
     maxSize: 2
-    desiredCapacity: 1
+    desiredCapacity: 2
     labels: {role: observability}
     privateNetworking: true
   - name: inference
@@ -121,7 +121,7 @@ managedNodeGroups:
     spot: true
     minSize: 1
     maxSize: 2
-    desiredCapacity: 1
+    desiredCapacity: 2
     labels: {role: inference}
     privateNetworking: true
     tags:
@@ -336,6 +336,38 @@ for role in $NODE_ROLES; do
   fi
 done
 
+log "Creating IRSA role for EFS CSI controller..."
+OIDC=$(aws eks describe-cluster --name "${CLUSTER_NAME}" --region "${REGION}" \
+  --query "cluster.identity.oidc.issuer" --output text | sed 's|https://||')
+EFS_ROLE_NAME="AmazonEKS_EFS_CSI_DriverRole"
+if aws iam get-role --role-name "$EFS_ROLE_NAME" &>/dev/null; then
+  log "EFS CSI IRSA role already exists — skipping"
+else
+  cat > /tmp/efs-trust.json <<TRUST
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": {"Federated": "arn:aws:iam::${ACCOUNT_ID}:oidc-provider/${OIDC}"},
+    "Action": "sts:AssumeRoleWithWebIdentity",
+    "Condition": {
+      "StringEquals": {
+        "${OIDC}:sub": "system:serviceaccount:kube-system:efs-csi-controller-sa",
+        "${OIDC}:aud": "sts.amazonaws.com"
+      }
+    }
+  }]
+}
+TRUST
+  aws iam create-role --role-name "$EFS_ROLE_NAME" \
+    --assume-role-policy-document file:///tmp/efs-trust.json \
+    --description "IRSA for EFS CSI controller" >/dev/null
+  aws iam attach-role-policy --role-name "$EFS_ROLE_NAME" \
+    --policy-arn arn:aws:iam::aws:policy/service-role/AmazonEFSCSIDriverPolicy
+  log "Created EFS CSI IRSA role: $EFS_ROLE_NAME"
+fi
+EFS_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/${EFS_ROLE_NAME}"
+
 log "Installing AWS EFS CSI driver..."
 helm repo add aws-efs-csi-driver https://kubernetes-sigs.github.io/aws-efs-csi-driver 2>/dev/null || true
 helm repo update aws-efs-csi-driver
@@ -345,9 +377,14 @@ else
   helm upgrade --install aws-efs-csi-driver aws-efs-csi-driver/aws-efs-csi-driver \
     --namespace kube-system \
     --set controller.region="${REGION}" \
+    --set controller.serviceAccount.annotations."eks\.amazonaws\.com/role-arn"="${EFS_ROLE_ARN}" \
     --wait --timeout 180s
   log "aws-efs-csi-driver installed"
 fi
+
+# Annotate SA in case driver was already installed without IRSA
+kubectl annotate sa efs-csi-controller-sa -n kube-system \
+  "eks.amazonaws.com/role-arn=${EFS_ROLE_ARN}" --overwrite
 
 log "Creating EFS StorageClass and shared PV/PVC for Ollama models..."
 kubectl apply -f - <<EOF

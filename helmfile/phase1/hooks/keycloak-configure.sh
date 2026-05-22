@@ -9,12 +9,16 @@ ADMIN_PASS=$(kubectl get secret keycloak-admin -n infra \
 
 KCADM="kubectl exec -n infra statefulset/keycloak -- /opt/keycloak/bin/kcadm.sh"
 
-# Authenticate
-$KCADM config credentials \
-  --server http://localhost:8080 \
-  --realm master \
-  --user admin \
-  --password "${ADMIN_PASS}"
+# Authenticate — retry until admin API is up (pod ready != API ready)
+for i in $(seq 1 12); do
+  $KCADM config credentials \
+    --server http://localhost:8080 \
+    --realm master \
+    --user admin \
+    --password "${ADMIN_PASS}" 2>/dev/null && break
+  echo "Keycloak admin API not ready yet, retrying ($i/12)..."
+  sleep 10
+done
 
 # Create firm-internal realm
 $KCADM create realms \
@@ -27,7 +31,7 @@ $KCADM update realms/firm-internal \
   -s "attributes.cibaBackchannelTokenDeliveryMode=poll" \
   -s "attributes.cibaExpiresIn=120" \
   -s "attributes.cibaInterval=5" \
-  -s "attributes.cibaAuthRequestedUserHint=login_hint"
+  -s "attributes.cibaAuthRequestedUserHint=login_hint" 2>/dev/null || true
 
 # Create realm roles
 for role in analyst admin viewer; do

@@ -1,0 +1,15 @@
+image:
+  registry: 923373850235.dkr.ecr.ap-south-1.amazonaws.com
+  repository: mirror/grafana-operator
+  tag: v5.23.0
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
+
+nodeSelector:
+  role: observability
